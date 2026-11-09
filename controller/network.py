@@ -6,8 +6,8 @@ import numpy as np
 class NeuralNetwork:
     """Map left/right sensor readings to left/right motor commands.
 
-    The network has one tanh hidden layer and sigmoid outputs, so motor
-    commands are in the range [0, 1].
+    The network has one tanh hidden layer and tanh outputs, so motor
+    commands are in the range [-1, 1] and can drive the robot in reverse.
     """
 
     def __init__(self, hidden_size=4, seed=None):
@@ -28,7 +28,6 @@ class NeuralNetwork:
 
         hidden = np.tanh(inputs @ self.weights_input_hidden + self.bias_hidden)
         logits = hidden @ self.weights_hidden_output + self.bias_output
-        logits = np.clip(logits, -500.0, 500.0)
-        return 1.0 / (1.0 + np.exp(-logits))
+        return np.tanh(logits)
 
     __call__ = forward

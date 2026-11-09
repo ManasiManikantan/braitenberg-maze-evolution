@@ -1,0 +1,49 @@
+
+from evolution.genetic_algorithm import GeneticAlgorithm
+from sim.robot import Vehicle
+from sim.world import World
+from sim.visualization import animate_world
+
+# Evolve a small population
+generations = 15
+
+
+def show_progress(generation, completed, total, fitness):
+    message = (
+        f"Generation {generation + 1}/{generations} | "
+        f"controller {completed}/{total} | best so far {fitness:.2f}"
+    )
+    print(message, end="\r" if completed < total else "\n", flush=True)
+
+
+ga = GeneticAlgorithm(
+    population_size=20,
+    hidden_size=4,
+    seed=42
+)
+
+best = ga.run(
+    generations=generations,
+    steps=500,
+    progress_callback=show_progress,
+)
+
+print("Best fitness:", best.fitness)
+
+# Reconstruct the best neural network
+controller = ga.decode_genome(best.genome)
+
+# Put the evolved controller into a robot
+robot = Vehicle(
+    controller=controller,
+    noise_stdev=0
+)
+
+world = World(vehicle=robot)
+
+# Watch the evolved robot
+animation = animate_world(
+    world,
+    steps=2000,
+    interval=30
+)

@@ -37,6 +37,7 @@ class GeneticAlgorithm:
 		tournament_size=3,
 		seed=None,
 		fitness_function=None,
+		evaluation_noise_stdev=0.0,
 	):
 		if population_size < 2:
 			raise ValueError("population_size must be at least 2")
@@ -52,6 +53,8 @@ class GeneticAlgorithm:
 			raise ValueError("elite_count must be in [0, population_size)")
 		if not 1 <= tournament_size <= population_size:
 			raise ValueError("tournament_size must be between 1 and population_size")
+		if evaluation_noise_stdev < 0:
+			raise ValueError("evaluation_noise_stdev must be non-negative")
 
 		self.population_size = population_size
 		self.hidden_size = hidden_size
@@ -60,6 +63,7 @@ class GeneticAlgorithm:
 		self.crossover_rate = crossover_rate
 		self.elite_count = elite_count
 		self.tournament_size = tournament_size
+		self.evaluation_noise_stdev = evaluation_noise_stdev
 		self.rng = np.random.default_rng(seed)
 		self.fitness_function = evaluate_fitness if fitness_function is None else fitness_function
 		self.genome_size = 5 * hidden_size + 2
@@ -152,16 +156,18 @@ class GeneticAlgorithm:
 		mutated[mask] += self.rng.normal(0.0, self.mutation_scale, mask.sum())
 		return mutated
 
-	@staticmethod
-	def _default_world_factory(controller):
-		return World(vehicle=Vehicle(controller=controller))
+	def _default_world_factory(self, controller):
+		return World(vehicle=Vehicle(
+			controller=controller,
+			noise_stdev=self.evaluation_noise_stdev,
+		))
 
-	def evaluate_population(self, world_factory=None, steps=1000):
+	def evaluate_population(self, world_factory=None, steps=1000, progress_callback=None):
 		"""Run and score every individual, returning the generation's best."""
 		if steps < 0:
 			raise ValueError("steps must be non-negative")
 		factory = self._default_world_factory if world_factory is None else world_factory
-		for individual in self.population:
+		for index, individual in enumerate(self.population):
 			controller = self.decode_genome(individual.genome)
 			world = factory(controller)
 			world.run(steps)
@@ -175,15 +181,23 @@ class GeneticAlgorithm:
 			if not np.isfinite(fitness):
 				raise ValueError("fitness values must be finite")
 			individual.fitness = fitness
+			if self.best_individual is None or fitness > self.best_individual.fitness:
+				self.best_individual = Individual(individual.genome)
+				self.best_individual.fitness = fitness
+				self.best_individual.metrics = individual.metrics
+			if progress_callback is not None:
+				progress_callback(
+					self.generation,
+					index + 1,
+					len(self.population),
+					self.best_individual.fitness,
+				)
 
 		best = max(self.population, key=lambda item: item.fitness)
-		if self.best_individual is None or best.fitness > self.best_individual.fitness:
-			self.best_individual = Individual(best.genome)
-			self.best_individual.fitness = best.fitness
-			self.best_individual.metrics = best.metrics
 		self.history.append({
 			"generation": self.generation,
-			"best_fitness": best.fitness,
+			"best_fitness": self.best_individual.fitness,
+			"generation_best_fitness": best.fitness,
 			"mean_fitness": float(np.mean([item.fitness for item in self.population])),
 		})
 		return best
@@ -208,12 +222,16 @@ class GeneticAlgorithm:
 		self.generation += 1
 		return self.population
 
-	def run(self, generations, steps=1000, world_factory=None):
+	def run(self, generations, steps=1000, world_factory=None, progress_callback=None):
 		"""Evaluate successive generations and return the best individual found."""
 		if generations < 1:
 			raise ValueError("generations must be at least 1")
 		for generation_index in range(generations):
-			self.evaluate_population(world_factory=world_factory, steps=steps)
+			self.evaluate_population(
+				world_factory=world_factory,
+				steps=steps,
+				progress_callback=progress_callback,
+			)
 			if generation_index < generations - 1:
 				self.next_generation()
 		return self.best_individual

@@ -21,7 +21,8 @@ python3 -m pip install -r requirements.txt
 [`controller/network.py`](controller/network.py) defines a small feed-forward
 network with two inputs (left and right sensor readings), one configurable
 hidden layer, and two outputs (left and right motor commands). The hidden layer
-uses `tanh`; the outputs use a sigmoid and are in the range `[0, 1]`.
+and outputs use `tanh`; motor commands are in the range `[-1, 1]`, where
+negative values drive the robot in reverse.
 
 ```python
 from controller.network import NeuralNetwork
@@ -74,15 +75,17 @@ world = World()
 animation = animate_world(world, steps=1000, interval=40)
 ```
 
-The animator displays the resulting pose and sensor geometry independently of
-motor-command sign, so it remains usable when controllers later support reverse.
-Motor outputs currently remain in `[0, 1]`. A fitness-over-generations plot can
-be added separately.
+The animator displays the resulting pose and sensor geometry for both forward
+and reverse motion. A fitness-over-generations plot can be added separately.
 
 ## Fitness and MAP-Elites
 
 `evolution/fitness.py` scores a completed run using progress toward the maze
-goal, collisions, moving steps, stuck status, and goal completion:
+goal, safe clearance from walls, wall-parallel movement, collisions, moving
+steps, stuck status, and goal completion. Collision costs increase after
+repeated impacts; useful path length and goal approach are rewarded, while
+movement away from the goal and getting stuck are penalized. Reaching the goal
+has a strong default bonus:
 
 ```python
 from evolution.fitness import evaluate_fitness
@@ -116,7 +119,12 @@ best_controller = algorithm.decode_genome(best.genome)
 
 Pass `world_factory(controller)` to `run()` to evaluate each controller in a
 custom maze or episode setup. `algorithm.history` records best and mean fitness
-for each evaluated generation.
+for each evaluated generation. An optional `progress_callback(generation,
+completed, total, fitness)` receives an update after each controller finishes.
+`best_fitness` is best-so-far and cannot decrease; `generation_best_fitness`
+shows the best score in that generation. Default GA evaluation disables motion
+noise for consistent comparisons; set `evaluation_noise_stdev` to a positive
+value when noisy evaluation is desired.
 
 ## Project layout
 

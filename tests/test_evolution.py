@@ -25,7 +25,8 @@ print("Generations:", len(ga.history))
 for result in ga.history:
     print(
         "Generation:", result["generation"],
-        "Best:", round(result["best_fitness"], 3),
+        "Best so far:", round(result["best_fitness"], 3),
+        "Generation best:", round(result["generation_best_fitness"], 3),
         "Average:", round(result["mean_fitness"], 3)
     )
 

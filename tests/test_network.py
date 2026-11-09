@@ -14,6 +14,11 @@ print("Sensor inputs:", sensors)
 print("Motor outputs:", motors)
 
 assert len(motors) == 2
-assert all(0 <= motor <= 1 for motor in motors)
+assert all(-1 <= motor <= 1 for motor in motors)
+
+network.weights_hidden_output[:] = 0
+network.bias_output[:] = [-2, 2]
+motors = network.forward(sensors)
+assert motors[0] < 0 < motors[1]
 
 print("Neural network test passed!")

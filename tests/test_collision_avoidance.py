@@ -37,6 +37,28 @@ class CollisionAvoidanceTests(unittest.TestCase):
                 )
                 self.assertFalse(maze.collides(position, radius=1.0), position)
 
+    def test_course_three_has_body_clear_two_turn_route(self):
+        maze = Maze(difficulty=3)
+        route = [
+            (0.0, 0.0),
+            (4.8, 0.0),
+            (4.8, 3.0),
+            (7.6, 3.0),
+            (7.6, -7.0),
+            maze.goal,
+        ]
+
+        for start, end in zip(route, route[1:]):
+            distance = math.hypot(end[0] - start[0], end[1] - start[1])
+            samples = max(1, int(distance / 0.1))
+            for sample in range(samples + 1):
+                fraction = sample / samples
+                position = (
+                    start[0] + fraction * (end[0] - start[0]),
+                    start[1] + fraction * (end[1] - start[1]),
+                )
+                self.assertFalse(maze.collides(position, radius=1.0), position)
+
     def test_reentering_a_path_cell_requests_a_new_scan(self):
         maze = Maze(walls=[], obstacles=[], goal=(8.0, -7.0), goal_radius=1.0)
         vehicle = Vehicle(noise_stdev=0)
@@ -46,6 +68,23 @@ class CollisionAvoidanceTests(unittest.TestCase):
         self.assertTrue(world._record_path_visit((0.0, 0.0)))
         self.assertEqual(world.path_revisits, 1)
         self.assertTrue(vehicle._turning_to_clear)
+
+    def test_no_progress_in_a_corner_requests_a_fresh_scan(self):
+        maze = Maze(walls=[], obstacles=[], goal=(0.0, 8.0), goal_radius=1.0)
+        vehicle = Vehicle(noise_stdev=0)
+        vehicle.request_avoidance_scan()
+        world = World(
+            maze=maze,
+            vehicle=vehicle,
+            stagnation_limit=2,
+            progress_tolerance=0.25,
+        )
+
+        world.run(2)
+
+        self.assertEqual(world.stagnant_steps, 0)
+        self.assertTrue(vehicle._turning_to_clear)
+        self.assertEqual(vehicle._scan_rotation, 0.0)
 
     def test_raycasts_distinguish_walls_from_obstacles(self):
         wall_maze = Maze(

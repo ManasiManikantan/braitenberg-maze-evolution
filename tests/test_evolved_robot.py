@@ -20,7 +20,7 @@ def show_progress(generation, completed, total, fitness):
 
 def make_challenge_world(controller):
     return World(
-        maze=Maze(difficulty=2),
+        maze=Maze(difficulty=3),
         vehicle=Vehicle(controller=controller, noise_stdev=0),
     )
 
@@ -57,7 +57,7 @@ robot = Vehicle(
     noise_stdev=0
 )
 
-world = World(maze=Maze(difficulty=2), vehicle=robot)
+world = World(maze=Maze(difficulty=3), vehicle=robot)
 
 # Watch the evolved robot
 animation = animate_world(

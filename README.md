@@ -44,8 +44,9 @@ those parameters.
 ## Maze simulation
 
 `sim/maze.py` provides a centered rectangular maze with boundary and interior
-walls plus rectangular obstacles. Use `Maze(difficulty=2)` for extra barriers
-and obstacles; the evolved-robot example trains and runs on this harder layout.
+walls plus rectangular obstacles. Use `Maze(difficulty=2)` or
+`Maze(difficulty=3)` for added barriers and obstacles; the evolved-robot example
+trains and runs on course 3.
 `Vehicle.sense(maze)` casts three parallel, forward-facing rays: one from the
 front and two from the robot's left/right body edges. Each reaches up to
 `sensor_range` maze units. Their distances are passed to the controller in
@@ -147,8 +148,9 @@ collision costs, movement-time costs, and the goal bonus can be inspected
 separately instead of interpreting the total score alone. It also reports
 `coverage`, `unique_cells_visited`, and `path_revisits`; revisiting old grid
 cells is penalized while exploring new cells is rewarded. During a run, the
-world also requests a fresh forward scan when the robot re-enters a visited
-grid cell.
+world requests a fresh forward scan when the robot re-enters a visited grid
+cell or makes no meaningful goal progress for 80 steps (configurable via
+`World.stagnation_limit` and `World.progress_tolerance`).
 
 ## Project layout
 

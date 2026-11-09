@@ -10,7 +10,8 @@ class World:
 	"""Coordinate maze sensing, controller decisions, and vehicle motion."""
 
 	def __init__(self, maze=None, vehicle=None, goal=None, goal_radius=None,
-			 goal_tolerance=None, revisit_cell_size=1.0, revisit_trigger=2):
+			 goal_tolerance=None, revisit_cell_size=1.0, revisit_trigger=2,
+			 stagnation_limit=80, progress_tolerance=0.25):
 		self.maze = Maze() if maze is None else maze
 		self.vehicle = Vehicle() if vehicle is None else vehicle
 		self.goal = self.maze.goal if goal is None else self._coordinates(goal)
@@ -27,6 +28,10 @@ class World:
 			raise ValueError("revisit_cell_size must be positive")
 		if revisit_trigger < 2:
 			raise ValueError("revisit_trigger must be at least 2")
+		if stagnation_limit < 1:
+			raise ValueError("stagnation_limit must be at least 1")
+		if progress_tolerance < 0:
+			raise ValueError("progress_tolerance must be non-negative")
 		self.steps = 0
 		self.collisions = 0
 		self.moving_steps = 0
@@ -38,6 +43,10 @@ class World:
 		self._last_cell = self._path_cell(self.position_history[0])
 		self.path_visit_counts[self._last_cell] = 1
 		self.initial_distance = self._distance_to_goal(self.position_history[0])
+		self._best_distance_since_progress = self.initial_distance
+		self.stagnant_steps = 0
+		self.stagnation_limit = stagnation_limit
+		self.progress_tolerance = progress_tolerance
 		self.reached_goal = self.initial_distance <= self.goal_tolerance
 
 	@staticmethod
@@ -85,9 +94,19 @@ class World:
 			self.moving_steps += 1
 		self.position_history.append(new_position)
 		self.steps += 1
-		self.reached_goal = self._distance_to_goal(new_position) <= self.goal_tolerance
+		goal_distance = self._distance_to_goal(new_position)
+		self.reached_goal = goal_distance <= self.goal_tolerance
 		if not self.reached_goal:
 			self._record_path_visit(new_position)
+			if self._best_distance_since_progress - goal_distance >= self.progress_tolerance:
+				self._best_distance_since_progress = goal_distance
+				self.stagnant_steps = 0
+			else:
+				self.stagnant_steps += 1
+			if self.stagnant_steps >= self.stagnation_limit:
+				self.vehicle.request_avoidance_scan()
+				self._best_distance_since_progress = goal_distance
+				self.stagnant_steps = 0
 		return self.vehicle
 
 	def run(self, steps):

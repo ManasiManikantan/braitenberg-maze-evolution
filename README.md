@@ -61,6 +61,24 @@ vehicle = world.vehicle
 
 Pass a custom `Maze` or `Vehicle` to `World` to change the layout or controller.
 
+## Maze visualization
+
+`sim/visualization.py` animates the walls and obstacles, goal, vehicle pose,
+forward sensor rays, and movement trail:
+
+```python
+from sim.visualization import animate_world
+from sim.world import World
+
+world = World()
+animation = animate_world(world, steps=1000, interval=40)
+```
+
+The animator displays the resulting pose and sensor geometry independently of
+motor-command sign, so it remains usable when controllers later support reverse.
+Motor outputs currently remain in `[0, 1]`. A fitness-over-generations plot can
+be added separately.
+
 ## Fitness and MAP-Elites
 
 `evolution/fitness.py` scores a completed run using progress toward the maze
@@ -108,6 +126,7 @@ for each evaluated generation.
 | `sim/robot.py` | Robot, distance sensors, and differential-drive motion |
 | `sim/maze.py` | Maze walls, obstacles, raycasting, and collision checks |
 | `sim/world.py` | Sense-think-move simulation loop |
+| `sim/visualization.py` | Live maze and robot animation |
 | `evolution/fitness.py` | Maze-run scoring and MAP-Elites behavior descriptors |
 | `evolution/genetic_algorithm.py` | Generational neural-controller evolution |
 

@@ -16,6 +16,7 @@ for i in range(100):
 
 print("Ending position:", robot.x_pos, robot.y_pos)
 print("Left sensor:", robot.left_sensor)
+print("Front sensor:", robot.front_sensor)
 print("Right sensor:", robot.right_sensor)
 print("Left motor:", robot.left_motor)
 print("Right motor:", robot.right_motor)

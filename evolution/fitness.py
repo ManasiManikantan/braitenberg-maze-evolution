@@ -52,7 +52,7 @@ def evaluate_fitness(
 	repeated_collision_penalty=1.0,
 	moving_step_penalty=0.01,
 	stuck_penalty=20.0,
-	goal_bonus=100.0,
+	goal_bonus=5.0,
 	safe_distance=1.5,
 	safe_distance_weight=4.0,
 ):
@@ -101,7 +101,9 @@ def evaluate_fitness(
 	else:
 		normalized_progress = min(1.0, max(0.0, progress / world.initial_distance))
 
-	reached_goal = final_distance <= world.goal_radius
+	reached_goal = final_distance <= world.goal_tolerance
+	goal_bonus_awarded = goal_bonus if reached_goal else 0.0
+	goal_overlap_margin = world.goal_tolerance - final_distance
 	stuck = _is_stuck(world, stuck_window, progress_tolerance)
 	coverage = _coverage(world, cell_size)
 	clearances = [
@@ -124,7 +126,7 @@ def evaluate_fitness(
 		- moving_step_penalty * world.moving_steps
 		- stuck_penalty * int(stuck)
 		+ safe_distance_weight * safe_distance_score
-		+ goal_bonus * int(reached_goal)
+		+ goal_bonus_awarded
 	)
 	return {
 		"score": score,
@@ -133,6 +135,10 @@ def evaluate_fitness(
 		"goal_regression_distance": goal_regression_distance,
 		"path_distance": path_distance,
 		"final_distance": final_distance,
+		"goal_center_error": final_distance,
+		"goal_tolerance": world.goal_tolerance,
+		"goal_overlap_margin": goal_overlap_margin,
+		"goal_bonus_awarded": goal_bonus_awarded,
 		"collisions": world.collisions,
 		"repeated_collision_cost": repeated_collision_cost,
 		"moving_steps": world.moving_steps,

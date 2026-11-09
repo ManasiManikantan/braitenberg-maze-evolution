@@ -9,19 +9,26 @@ from .robot import Vehicle
 class World:
 	"""Coordinate maze sensing, controller decisions, and vehicle motion."""
 
-	def __init__(self, maze=None, vehicle=None, goal=None, goal_radius=None):
+	def __init__(self, maze=None, vehicle=None, goal=None, goal_radius=None,
+			 goal_tolerance=None):
 		self.maze = Maze() if maze is None else maze
 		self.vehicle = Vehicle() if vehicle is None else vehicle
 		self.goal = self.maze.goal if goal is None else self._coordinates(goal)
 		self.goal_radius = self.maze.goal_radius if goal_radius is None else goal_radius
 		if self.goal_radius <= 0:
 			raise ValueError("goal_radius must be positive")
+		default_tolerance = self.goal_radius + self.vehicle.radius
+		self.goal_tolerance = (
+			default_tolerance if goal_tolerance is None else goal_tolerance
+		)
+		if self.goal_tolerance <= 0:
+			raise ValueError("goal_tolerance must be positive")
 		self.steps = 0
 		self.collisions = 0
 		self.moving_steps = 0
 		self.position_history = [(self.vehicle.x_pos, self.vehicle.y_pos)]
 		self.initial_distance = self._distance_to_goal(self.position_history[0])
-		self.reached_goal = self.initial_distance <= self.goal_radius
+		self.reached_goal = self.initial_distance <= self.goal_tolerance
 
 	@staticmethod
 	def _coordinates(point):
@@ -38,7 +45,7 @@ class World:
 		if self.reached_goal:
 			return self.vehicle
 		old_position = (self.vehicle.x_pos, self.vehicle.y_pos)
-		self.vehicle.sense(self.maze)
+		self.vehicle.sense(self.maze, self.goal)
 		self.vehicle.think()
 		if self.vehicle.move(self.maze):
 			self.collisions += 1
@@ -48,7 +55,7 @@ class World:
 			self.moving_steps += 1
 		self.position_history.append(new_position)
 		self.steps += 1
-		self.reached_goal = self._distance_to_goal(new_position) <= self.goal_radius
+		self.reached_goal = self._distance_to_goal(new_position) <= self.goal_tolerance
 		return self.vehicle
 
 	def run(self, steps):

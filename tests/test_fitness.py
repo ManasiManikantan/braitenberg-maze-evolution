@@ -80,10 +80,23 @@ class FitnessTests(unittest.TestCase):
 
     def test_reaching_goal_receives_large_bonus(self):
         approaching_goal = self.make_world([(0.0, 0.0)])
-        reached_goal = self.make_world([(0.0, 0.0), (8.0, -7.0)])
+        reached_goal = self.make_world([(0.0, 0.0), (8.0, -5.1)])
 
-        self.assertGreater(evaluate_fitness(reached_goal)["score"],
-                           evaluate_fitness(approaching_goal)["score"])
+        approaching_metrics = evaluate_fitness(approaching_goal)
+        reached_metrics = evaluate_fitness(reached_goal)
+        self.assertGreater(reached_metrics["score"], approaching_metrics["score"])
+        self.assertEqual(reached_metrics["goal_bonus_awarded"], 5.0)
+        self.assertLessEqual(reached_metrics["goal_center_error"], 2.0)
+        self.assertAlmostEqual(reached_metrics["goal_overlap_margin"], 0.1)
+
+    def test_goal_radius_edge_does_not_get_completion_bonus(self):
+        world = self.make_world([(0.0, 0.0), (8.0, -4.9)])
+
+        metrics = evaluate_fitness(world)
+
+        self.assertFalse(metrics["reached_goal"])
+        self.assertEqual(metrics["goal_bonus_awarded"], 0.0)
+        self.assertLess(metrics["goal_overlap_margin"], 0.0)
 
 
 if __name__ == "__main__":

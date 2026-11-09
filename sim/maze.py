@@ -23,14 +23,27 @@ class Maze:
 		(1.5, 1.5, 2.5, 2.5),
 		(7.0, -2.0, 8.0, -1.0),
 	)
+	CHALLENGE_WALLS = (
+		((0.0, -8.0), (4.0, -8.0)),
+		((2.0, -8.0), (2.0, -7.0)),
+		((6.0, -5.5), (9.0, -5.5)),
+	)
+	CHALLENGE_OBSTACLES = (
+		(-2.5, -3.5, -1.5, -2.5),
+		(2.5, -3.5, 3.5, -2.5),
+		(6.5, -3.5, 7.5, -2.5),
+	)
 
 	def __init__(self, width=20.0, height=20.0, walls=None, obstacles=None,
-			 goal=None, goal_radius=None):
+			 goal=None, goal_radius=None, difficulty=1):
 		if width <= 0 or height <= 0:
 			raise ValueError("maze width and height must be positive")
+		if difficulty not in (1, 2):
+			raise ValueError("difficulty must be 1 or 2")
 
 		self.width = float(width)
 		self.height = float(height)
+		self.difficulty = difficulty
 		self.x_min = -self.width / 2
 		self.x_max = self.width / 2
 		self.y_min = -self.height / 2
@@ -38,10 +51,13 @@ class Maze:
 		if walls is None:
 			x_scale = self.width / 20.0
 			y_scale = self.height / 20.0
+			layout_walls = list(self.DEFAULT_WALLS)
+			if difficulty == 2:
+				layout_walls.extend(self.CHALLENGE_WALLS)
 			self.interior_walls = [
 				((start[0] * x_scale, start[1] * y_scale),
 				 (end[0] * x_scale, end[1] * y_scale))
-				for start, end in self.DEFAULT_WALLS
+				for start, end in layout_walls
 			]
 		else:
 			self.interior_walls = list(walls)
@@ -49,10 +65,13 @@ class Maze:
 		if obstacles is None:
 			x_scale = self.width / 20.0
 			y_scale = self.height / 20.0
+			layout_obstacles = list(self.DEFAULT_OBSTACLES)
+			if difficulty == 2:
+				layout_obstacles.extend(self.CHALLENGE_OBSTACLES)
 			self.obstacles = [
 				(x_min * x_scale, y_min * y_scale,
 				 x_max * x_scale, y_max * y_scale)
-				for x_min, y_min, x_max, y_max in self.DEFAULT_OBSTACLES
+				for x_min, y_min, x_max, y_max in layout_obstacles
 			]
 		else:
 			self.obstacles = list(obstacles)

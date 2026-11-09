@@ -66,14 +66,14 @@ class GeneticAlgorithm:
 		self.evaluation_noise_stdev = evaluation_noise_stdev
 		self.rng = np.random.default_rng(seed)
 		self.fitness_function = evaluate_fitness if fitness_function is None else fitness_function
-		self.genome_size = 5 * hidden_size + 2
+		self.genome_size = 6 * hidden_size + 2
 		self.population = self.initialize_population()
 		self.generation = 0
 		self.best_individual = None
 		self.history = []
 
 	def _random_genome(self):
-		input_hidden = self.rng.normal(0.0, 1.0, (2, self.hidden_size))
+		input_hidden = self.rng.normal(0.0, 1.0, (3, self.hidden_size))
 		bias_hidden = np.zeros(self.hidden_size)
 		hidden_output = self.rng.normal(0.0, 1.0, (self.hidden_size, 2))
 		bias_output = np.zeros(2)
@@ -90,7 +90,7 @@ class GeneticAlgorithm:
 
 	def encode_network(self, network):
 		"""Flatten a compatible neural network into this algorithm's genome format."""
-		if network.weights_input_hidden.shape != (2, self.hidden_size):
+		if network.weights_input_hidden.shape != (3, self.hidden_size):
 			raise ValueError("network hidden size does not match the genetic algorithm")
 		if network.weights_hidden_output.shape != (self.hidden_size, 2):
 			raise ValueError("network hidden size does not match the genetic algorithm")
@@ -109,9 +109,9 @@ class GeneticAlgorithm:
 
 		network = NeuralNetwork(hidden_size=self.hidden_size, seed=0)
 		cursor = 0
-		input_hidden_size = 2 * self.hidden_size
+		input_hidden_size = 3 * self.hidden_size
 		network.weights_input_hidden = genome[cursor:cursor + input_hidden_size].reshape(
-			2, self.hidden_size
+			3, self.hidden_size
 		).copy()
 		cursor += input_hidden_size
 		network.bias_hidden = genome[cursor:cursor + self.hidden_size].copy()

@@ -1,11 +1,13 @@
 
 from evolution.genetic_algorithm import GeneticAlgorithm
+from sim.maze import Maze
 from sim.robot import Vehicle
 from sim.world import World
 from sim.visualization import animate_world
 
 # Evolve a small population
 generations = 15
+training_steps = 2000
 
 
 def show_progress(generation, completed, total, fitness):
@@ -16,6 +18,13 @@ def show_progress(generation, completed, total, fitness):
     print(message, end="\r" if completed < total else "\n", flush=True)
 
 
+def make_challenge_world(controller):
+    return World(
+        maze=Maze(difficulty=2),
+        vehicle=Vehicle(controller=controller, noise_stdev=0),
+    )
+
+
 ga = GeneticAlgorithm(
     population_size=20,
     hidden_size=4,
@@ -24,11 +33,15 @@ ga = GeneticAlgorithm(
 
 best = ga.run(
     generations=generations,
-    steps=500,
+    steps=training_steps,
+    world_factory=make_challenge_world,
     progress_callback=show_progress,
 )
 
 print("Best fitness:", best.fitness)
+print("Reached goal:", best.metrics["reached_goal"])
+print("Goal center error:", round(best.metrics["goal_center_error"], 3))
+print("Goal bonus:", best.metrics["goal_bonus_awarded"])
 
 # Reconstruct the best neural network
 controller = ga.decode_genome(best.genome)
@@ -39,7 +52,7 @@ robot = Vehicle(
     noise_stdev=0
 )
 
-world = World(vehicle=robot)
+world = World(maze=Maze(difficulty=2), vehicle=robot)
 
 # Watch the evolved robot
 animation = animate_world(

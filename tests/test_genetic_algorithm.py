@@ -4,6 +4,13 @@ from evolution.genetic_algorithm import GeneticAlgorithm
 
 
 class GeneticAlgorithmTests(unittest.TestCase):
+    def test_genome_encodes_three_sensor_inputs(self):
+        algorithm = GeneticAlgorithm(population_size=2, hidden_size=2, seed=1)
+        network = algorithm.decode_genome(algorithm.population[0].genome)
+
+        self.assertEqual(algorithm.genome_size, 14)
+        self.assertEqual(network.weights_input_hidden.shape, (3, 2))
+
     def test_best_fitness_history_never_decreases(self):
         scores = iter((1.0, 0.0, -22.0, -23.0))
         algorithm = GeneticAlgorithm(

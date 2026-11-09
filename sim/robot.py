@@ -30,7 +30,7 @@ class Vehicle(Point):
     at the front of the body and angled symmetrically around its heading.
 
     Args:
-        angle_offset: Angle between each sensor ray and the forward axis.
+        angle_offset: Legacy argument retained for constructor compatibility.
         turn_gain:    How strongly the sensor difference steers the vehicle.
                       Larger values produce sharper turns.
         noise_stdev:  Standard deviation of Gaussian noise added to the
@@ -38,9 +38,11 @@ class Vehicle(Point):
         sensor_range: Maximum sensor distance in maze units.
         avoidance_distance: Distance at which the reactive safety layer steers away.
         reverse_steps: Number of steps in a collision-recovery reverse burst.
+        collision_reverse_steps: Short reverse burst after first wall contact.
         reverse_speed: Absolute motor command used during reverse recovery.
         cruise_speed: Minimum forward motor command when the path is clear.
         turn_speed: Motor command magnitude used to turn away from blocked rays.
+        goal_seek_distance: Maximum distance for direct goal-seeking behavior.
         wiring:       Sensor-to-motor mapping: "crossed" (default) or "direct".
         controller:   Optional controller with a two-input, two-output API.
         distance:     Legacy alias for sensor_range.
@@ -48,8 +50,10 @@ class Vehicle(Point):
 
     def __init__(self, angle_offset=np.pi/6, turn_gain=0.1, noise_stdev=0.1,
                  sensor_range=10, wiring="crossed", controller=None, distance=None,
-                 avoidance_distance=3.0, reverse_steps=12, reverse_speed=0.75,
-                 avoidance_gain=1.5, cruise_speed=0.5, turn_speed=0.75):
+                 avoidance_distance=3.0, reverse_steps=12, collision_reverse_steps=3,
+                 reverse_speed=0.75,
+                 avoidance_gain=1.5, cruise_speed=0.5, turn_speed=0.75,
+                 goal_seek_distance=4.0):
         super().__init__()
         # Every Vehicle starts at the origin facing along +x. The only thing
         # that varies between repetitions is the random noise.
@@ -58,6 +62,7 @@ class Vehicle(Point):
         self.radius = 1.0               # body radius; also the sensor arm length
 
         self.left_sensor  = 0.0        # current left sensor activation  [0, 1]
+        self.front_sensor = 0.0        # current forward sensor activation [0, 1]
         self.right_sensor = 0.0        # current right sensor activation [0, 1]
         self.left_motor   = 0.0        # left motor command
         self.right_motor  = 0.0        # right motor command
@@ -72,6 +77,8 @@ class Vehicle(Point):
             raise ValueError("avoidance_distance cannot exceed sensor_range")
         if reverse_steps < 1:
             raise ValueError("reverse_steps must be at least 1")
+        if collision_reverse_steps < 1:
+            raise ValueError("collision_reverse_steps must be at least 1")
         if not 0 < reverse_speed <= 1:
             raise ValueError("reverse_speed must be in (0, 1]")
         if avoidance_gain < 0:
@@ -80,14 +87,19 @@ class Vehicle(Point):
             raise ValueError("cruise_speed must be in (0, 1]")
         if not 0 < turn_speed <= 1:
             raise ValueError("turn_speed must be in (0, 1]")
+        if goal_seek_distance <= 0:
+            raise ValueError("goal_seek_distance must be positive")
         self.sensor_range = sensor_range
         self.avoidance_distance = avoidance_distance
         self.reverse_steps = reverse_steps
+        self.collision_reverse_steps = collision_reverse_steps
         self.reverse_speed = reverse_speed
         self.avoidance_gain = avoidance_gain
         self.cruise_speed = cruise_speed
         self.turn_speed = turn_speed
+        self.goal_seek_distance = goal_seek_distance
         self.left_distance = sensor_range
+        self.front_distance = sensor_range
         self.right_distance = sensor_range
         self._reverse_steps_remaining = 0
         self._turning_to_clear = False
@@ -98,6 +110,9 @@ class Vehicle(Point):
         self._scan_best_heading = 0.0
         self._aligning_to_opening = False
         self._opening_heading = 0.0
+        self.goal_visible = False
+        self._goal_distance = np.inf
+        self._goal_bearing = 0.0
         self._turn_direction = 1
 
         self.turn_gain   = turn_gain
@@ -109,17 +124,22 @@ class Vehicle(Point):
 
         # Sensor positions as Point objects, updated every step
         self.rs = Point()   # right sensor
+        self.fs = Point()   # forward sensor
         self.ls = Point()   # left sensor
         self.update_sensor_pos()
 
     def update_sensor_pos(self):
-        """Recompute the front-left and front-right sensor origins."""
-        left_angle = self.orientation + self.angle_offset
-        right_angle = self.orientation - self.angle_offset
-        self.ls.x_pos = self.x_pos + self.radius * np.cos(left_angle)
-        self.ls.y_pos = self.y_pos + self.radius * np.sin(left_angle)
-        self.rs.x_pos = self.x_pos + self.radius * np.cos(right_angle)
-        self.rs.y_pos = self.y_pos + self.radius * np.sin(right_angle)
+        """Place side sensors on the body edge and all sensors facing forward."""
+        forward_x = np.cos(self.orientation)
+        forward_y = np.sin(self.orientation)
+        left_x = -np.sin(self.orientation)
+        left_y = np.cos(self.orientation)
+        self.ls.x_pos = self.x_pos + self.radius * left_x
+        self.ls.y_pos = self.y_pos + self.radius * left_y
+        self.fs.x_pos = self.x_pos + self.radius * forward_x
+        self.fs.y_pos = self.y_pos + self.radius * forward_y
+        self.rs.x_pos = self.x_pos - self.radius * left_x
+        self.rs.y_pos = self.y_pos - self.radius * left_y
 
     def update_body_pos(self):
         """Advance the body one step along the current heading at the current velocity."""
@@ -127,8 +147,8 @@ class Vehicle(Point):
         self.y_pos += self.velocity * np.sin(self.orientation)
         self.update_sensor_pos()
 
-    def sense(self, maze):
-        """Read normalized proximity to the nearest wall or obstacle.
+    def sense(self, maze, goal=None):
+        """Read obstacle proximity and check whether the goal is visible.
 
         Sensor values range from 0 (nothing detected within range) to 1
         (an obstacle at the sensor origin). Raw distances are also exposed as
@@ -137,25 +157,83 @@ class Vehicle(Point):
         Args:
             maze: Maze providing a ``raycast`` method.
         """
-        left_angle = self.orientation + self.angle_offset
-        right_angle = self.orientation - self.angle_offset
+        ray_direction = (np.cos(self.orientation), np.sin(self.orientation))
         self.left_distance = maze.raycast(
             self.ls,
-            (np.cos(left_angle), np.sin(left_angle)),
+            ray_direction,
+            self.sensor_range,
+        )
+        self.front_distance = maze.raycast(
+            self.fs,
+            ray_direction,
             self.sensor_range,
         )
         self.right_distance = maze.raycast(
             self.rs,
-            (np.cos(right_angle), np.sin(right_angle)),
+            ray_direction,
             self.sensor_range,
         )
         self.left_sensor = 1.0 - self.left_distance / self.sensor_range
+        self.front_sensor = 1.0 - self.front_distance / self.sensor_range
         self.right_sensor = 1.0 - self.right_distance / self.sensor_range
+        self.goal_visible = False
+        self._goal_distance = np.inf
+        if goal is not None:
+            if hasattr(goal, "x_pos"):
+                goal_x, goal_y = goal.x_pos, goal.y_pos
+            else:
+                goal_x, goal_y = goal
+            goal_dx = goal_x - self.x_pos
+            goal_dy = goal_y - self.y_pos
+            goal_distance = np.hypot(goal_dx, goal_dy)
+            self._goal_distance = goal_distance
+            if goal_distance > 0:
+                self._goal_bearing = np.arctan2(goal_dy, goal_dx)
+                distance_to_goal = maze.raycast(
+                    self,
+                    (goal_dx, goal_dy),
+                    goal_distance,
+                )
+                self.goal_visible = distance_to_goal >= goal_distance - 1e-6
 
     def think(self):
         """Map sensors to motors, then apply a proximity-based safety override."""
+        left_clearance = max(0.0, self.left_distance - self.radius)
+        front_clearance = max(0.0, self.front_distance - self.radius)
+        right_clearance = max(0.0, self.right_distance - self.radius)
         if self._reverse_steps_remaining > 0:
             self.left_motor = self.right_motor = -self.reverse_speed
+            return
+
+        if self.goal_visible and self._goal_distance <= self.goal_seek_distance:
+            self._turning_to_clear = False
+            self._aligning_to_opening = False
+            heading_error = np.arctan2(
+                np.sin(self._goal_bearing - self.orientation),
+                np.cos(self._goal_bearing - self.orientation),
+            )
+            turn = self.turn_speed * float(np.clip(
+                heading_error / (np.pi / 2), -1.0, 1.0
+            ))
+            left_hazard = float(np.clip(
+                1.0 - left_clearance / self.avoidance_distance, 0.0, 1.0
+            ))
+            front_hazard = float(np.clip(
+                1.0 - front_clearance / self.avoidance_distance, 0.0, 1.0
+            ))
+            right_hazard = float(np.clip(
+                1.0 - right_clearance / self.avoidance_distance, 0.0, 1.0
+            ))
+            self.left_motor = float(np.clip(
+                self.cruise_speed + turn - self.avoidance_gain * max(left_hazard, front_hazard),
+                -1.0,
+                1.0,
+            ))
+            self.right_motor = float(np.clip(
+                self.cruise_speed - turn - self.avoidance_gain * max(right_hazard, front_hazard),
+                -1.0,
+                1.0,
+            ))
             return
 
         if self._aligning_to_opening:
@@ -211,10 +289,14 @@ class Vehicle(Point):
             return
 
         both_rays_blocked = (
-            self.left_distance <= self.avoidance_distance
-            and self.right_distance <= self.avoidance_distance
+            left_clearance <= self.avoidance_distance
+            and right_clearance <= self.avoidance_distance
         )
-        if both_rays_blocked and not self._turning_to_clear:
+        front_blocked_without_side_opening = (
+            front_clearance <= self.avoidance_distance
+            and abs(left_clearance - right_clearance) < 0.25
+        )
+        if (both_rays_blocked or front_blocked_without_side_opening) and not self._turning_to_clear:
             self._begin_avoidance_turn()
             self._record_scan_opening()
             self.left_motor = self.turn_speed * self._turn_direction
@@ -223,7 +305,7 @@ class Vehicle(Point):
 
         if self.controller is not None:
             left_motor, right_motor = self.controller.forward(
-                (self.left_sensor, self.right_sensor)
+                (self.left_sensor, self.front_sensor, self.right_sensor)
             )
         elif self.wiring == "crossed":
             left_motor = self.right_sensor
@@ -235,12 +317,15 @@ class Vehicle(Point):
             raise ValueError("wiring must be 'crossed' or 'direct'")
 
         left_hazard = float(np.clip(
-            1.0 - self.left_distance / self.avoidance_distance, 0.0, 1.0
+            1.0 - left_clearance / self.avoidance_distance, 0.0, 1.0
         ))
         right_hazard = float(np.clip(
-            1.0 - self.right_distance / self.avoidance_distance, 0.0, 1.0
+            1.0 - right_clearance / self.avoidance_distance, 0.0, 1.0
         ))
-        opening_difference = self.left_distance - self.right_distance
+        front_hazard = float(np.clip(
+            1.0 - front_clearance / self.avoidance_distance, 0.0, 1.0
+        ))
+        opening_difference = left_clearance - right_clearance
         if abs(opening_difference) >= 0.25:
             base_speed = max(
                 self.cruise_speed,
@@ -253,14 +338,14 @@ class Vehicle(Point):
             self.right_motor = float(np.clip(base_speed - opening_turn, -1.0, 1.0))
             return
 
-        if max(left_hazard, right_hazard) == 0.0:
+        if max(left_hazard, front_hazard, right_hazard) == 0.0:
             left_motor = max(float(left_motor), self.cruise_speed)
             right_motor = max(float(right_motor), self.cruise_speed)
         self.left_motor = float(np.clip(
-            left_motor - self.avoidance_gain * left_hazard, -1.0, 1.0
+            left_motor - self.avoidance_gain * max(left_hazard, front_hazard), -1.0, 1.0
         ))
         self.right_motor = float(np.clip(
-            right_motor - self.avoidance_gain * right_hazard, -1.0, 1.0
+            right_motor - self.avoidance_gain * max(right_hazard, front_hazard), -1.0, 1.0
         ))
 
 
@@ -277,7 +362,10 @@ class Vehicle(Point):
     def _record_scan_opening(self):
         if self._scan_phase != "sweep":
             return
-        best_distance = max(self.left_distance, self.right_distance)
+        best_distance = max(
+            0.0,
+            min(self.left_distance, self.right_distance) - self.radius,
+        )
         if best_distance > self._scan_best_distance:
             self._scan_best_distance = best_distance
             self._scan_best_heading = self.orientation
@@ -313,8 +401,14 @@ class Vehicle(Point):
         if collided:
             self.x_pos, self.y_pos = old_position
             self.velocity = 0.0
-            self._reverse_steps_remaining = 0
-            self._begin_avoidance_turn()
+            if was_reversing:
+                self._reverse_steps_remaining = 0
+                self._begin_avoidance_turn()
+            else:
+                self._reverse_steps_remaining = 0
+                self._turning_to_clear = False
+                self._aligning_to_opening = False
+                self.reverse(self.collision_reverse_steps)
             self.update_sensor_pos()
         elif was_reversing:
             self._reverse_steps_remaining -= 1

@@ -19,7 +19,7 @@ python3 -m pip install -r requirements.txt
 ## Neural-network controller
 
 [`controller/network.py`](controller/network.py) defines a small feed-forward
-network with two inputs (left and right sensor readings), one configurable
+network with three inputs (left, forward, and right sensor readings), one configurable
 hidden layer, and two outputs (left and right motor commands). The hidden layer
 and outputs use `tanh`; motor commands are in the range `[-1, 1]`, where
 negative values drive the robot in reverse.
@@ -28,14 +28,14 @@ negative values drive the robot in reverse.
 from controller.network import NeuralNetwork
 
 controller = NeuralNetwork(hidden_size=4, seed=7)
-left_motor, right_motor = controller.forward((0.2, 0.8))
+left_motor, right_motor = controller.forward((0.2, 0.5, 0.8))
 ```
 
 The optional `seed` makes the initial weights reproducible. Calling the
 controller directly is equivalent to calling `forward`:
 
 ```python
-motor_commands = controller((left_sensor, right_sensor))
+motor_commands = controller((left_sensor, front_sensor, right_sensor))
 ```
 
 This network initializes random weights; the genetic algorithm below evolves
@@ -44,8 +44,12 @@ those parameters.
 ## Maze simulation
 
 `sim/maze.py` provides a centered rectangular maze with boundary and interior
-walls plus rectangular obstacles. `Vehicle.sense(maze)` casts two forward-facing
-rays, up to `sensor_range` maze units. `left_distance` and `right_distance` hold
+walls plus rectangular obstacles. Use `Maze(difficulty=2)` for extra barriers
+and obstacles; the evolved-robot example trains and runs on this harder layout.
+`Vehicle.sense(maze)` casts three parallel, forward-facing rays: one from the
+front and two from the robot's left/right body edges. Each reaches up to
+`sensor_range` maze units. Their distances are passed to the controller in
+left/front/right order. `left_distance`, `front_distance`, and `right_distance` hold
 the measured distances; the controller inputs are normalized proximity values
 from 0 (no obstacle in range) to 1 (obstacle at the sensor).
 
@@ -61,6 +65,10 @@ vehicle = world.vehicle
 ```
 
 Pass a custom `Maze` or `Vehicle` to `World` to change the layout or controller.
+When the goal is unobstructed and within `goal_seek_distance` (4 maze units by
+default), the robot steers toward it; at greater distances it keeps navigating
+until the goal is closer. Walls and obstacles keep the goal hidden until a path
+opens.
 When both forward rays are blocked, the vehicle scans a 180-degree forward arc,
 aligns with the heading that saw the greatest clearance, and then moves toward
 that opening; it does not select a route directly behind itself.
@@ -88,7 +96,9 @@ goal, safe clearance from walls, collisions, moving
 steps, stuck status, and goal completion. Collision costs increase after
 repeated impacts; useful path length and goal approach are rewarded, while
 movement away from the goal and getting stuck are penalized. Reaching the goal
-has a strong default bonus:
+region (when the robot body overlaps it; 2 units center-to-center by default)
+earns a 5-point completion bonus. Fitness reports center error and overlap
+margin separately:
 
 ```python
 from evolution.fitness import evaluate_fitness
@@ -116,7 +126,7 @@ elitist generational replacement:
 from evolution.genetic_algorithm import GeneticAlgorithm
 
 algorithm = GeneticAlgorithm(population_size=50, seed=7)
-best = algorithm.run(generations=20, steps=1000)
+best = algorithm.run(generations=20, steps=2000)
 best_controller = algorithm.decode_genome(best.genome)
 ```
 
@@ -133,7 +143,7 @@ value when noisy evaluation is desired.
 
 | Path | Description |
 | --- | --- |
-| `controller/network.py` | Two-sensor, two-motor feed-forward neural network |
+| `controller/network.py` | Three-sensor, two-motor feed-forward neural network |
 | `sim/robot.py` | Robot, distance sensors, and differential-drive motion |
 | `sim/maze.py` | Maze walls, obstacles, raycasting, and collision checks |
 | `sim/world.py` | Sense-think-move simulation loop |

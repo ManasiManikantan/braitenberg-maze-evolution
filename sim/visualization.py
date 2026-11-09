@@ -31,7 +31,7 @@ def animate_world(world=None, steps=1000, interval=40, show=True):
 
     maze = world.maze
     vehicle = world.vehicle
-    vehicle.sense(maze)
+    vehicle.sense(maze, world.goal)
 
     figure, axes = plt.subplots(figsize=(8, 8))
     axes.set_aspect("equal", adjustable="box")
@@ -76,6 +76,7 @@ def animate_world(world=None, steps=1000, interval=40, show=True):
     axes.add_patch(heading)
 
     left_ray, = axes.plot([], [], color="#d58a32", linewidth=1.4, zorder=4)
+    front_ray, = axes.plot([], [], color="#bd5b45", linewidth=1.8, zorder=4)
     right_ray, = axes.plot([], [], color="#347e9e", linewidth=1.4, zorder=4)
     status = axes.text(
         0.02, 0.98, "", transform=axes.transAxes,
@@ -91,7 +92,7 @@ def animate_world(world=None, steps=1000, interval=40, show=True):
             if not world.reached_goal:
                 world.step()
             simulated_frames += 1
-        vehicle.sense(maze)
+        vehicle.sense(maze, world.goal)
 
         positions = world.position_history
         trail.set_data(
@@ -107,8 +108,9 @@ def animate_world(world=None, steps=1000, interval=40, show=True):
         heading.set_positions((vehicle.x_pos, vehicle.y_pos), heading_end)
 
         sensor_rays = (
-            (left_ray, vehicle.ls, vehicle.left_distance, vehicle.orientation + vehicle.angle_offset),
-            (right_ray, vehicle.rs, vehicle.right_distance, vehicle.orientation - vehicle.angle_offset),
+            (left_ray, vehicle.ls, vehicle.left_distance, vehicle.orientation),
+            (front_ray, vehicle.fs, vehicle.front_distance, vehicle.orientation),
+            (right_ray, vehicle.rs, vehicle.right_distance, vehicle.orientation),
         )
         for ray, sensor, distance, angle in sensor_rays:
             ray.set_data(
@@ -120,7 +122,7 @@ def animate_world(world=None, steps=1000, interval=40, show=True):
         status.set_text(
             f"step {world.steps} / {steps}    collisions {world.collisions}\n{goal_status}"
         )
-        return trail, robot, heading, left_ray, right_ray, status
+        return trail, robot, heading, left_ray, front_ray, right_ray, status
 
     animation = FuncAnimation(
         figure,

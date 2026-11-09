@@ -55,9 +55,6 @@ def evaluate_fitness(
 	goal_bonus=100.0,
 	safe_distance=1.5,
 	safe_distance_weight=4.0,
-	wall_following_distance=2.5,
-	preferred_wall_distance=1.0,
-	wall_following_weight=2.0,
 ):
 	"""Score a completed ``World`` run and return metrics for analysis.
 
@@ -79,10 +76,6 @@ def evaluate_fitness(
 		raise ValueError("path_distance_cap must be positive")
 	if safe_distance <= 0:
 		raise ValueError("safe_distance must be positive")
-	if wall_following_distance <= 0:
-		raise ValueError("wall_following_distance must be positive")
-	if not 0 <= preferred_wall_distance <= wall_following_distance:
-		raise ValueError("preferred_wall_distance must be within wall_following_distance")
 
 	final_position = world.position_history[-1]
 	final_distance = _distance_to_goal(final_position, world.goal)
@@ -119,17 +112,6 @@ def evaluate_fitness(
 		min(1.0, max(0.0, clearance) / safe_distance)
 		for clearance in clearances
 	) / len(clearances)
-	wall_scores = [
-		world.maze.wall_following_score(
-			start,
-			end,
-			radius=world.vehicle.radius,
-			follow_distance=wall_following_distance,
-			preferred_distance=preferred_wall_distance,
-		)
-		for start, end in zip(world.position_history, world.position_history[1:])
-	]
-	wall_following_score = sum(wall_scores) / len(wall_scores) if wall_scores else 0.0
 	repeated_collision_cost = repeated_collision_penalty * max(0, world.collisions - 1)**2
 
 	score = (
@@ -142,7 +124,6 @@ def evaluate_fitness(
 		- moving_step_penalty * world.moving_steps
 		- stuck_penalty * int(stuck)
 		+ safe_distance_weight * safe_distance_score
-		+ wall_following_weight * wall_following_score
 		+ goal_bonus * int(reached_goal)
 	)
 	return {
@@ -161,7 +142,6 @@ def evaluate_fitness(
 		"minimum_clearance": min(clearances),
 		"mean_clearance": sum(clearances) / len(clearances),
 		"safe_distance_score": safe_distance_score,
-		"wall_following_score": wall_following_score,
 		"coverage": coverage,
 		"normalized_goal_progress": normalized_progress,
 		"behavior_descriptor": (coverage, normalized_progress),

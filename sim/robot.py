@@ -41,7 +41,6 @@ class Vehicle(Point):
         reverse_speed: Absolute motor command used during reverse recovery.
         cruise_speed: Minimum forward motor command when the path is clear.
         turn_speed: Motor command magnitude used to turn away from blocked rays.
-        turn_timeout: Steps to turn before backing up and trying the other direction.
         wiring:       Sensor-to-motor mapping: "crossed" (default) or "direct".
         controller:   Optional controller with a two-input, two-output API.
         distance:     Legacy alias for sensor_range.
@@ -50,8 +49,7 @@ class Vehicle(Point):
     def __init__(self, angle_offset=np.pi/6, turn_gain=0.1, noise_stdev=0.1,
                  sensor_range=10, wiring="crossed", controller=None, distance=None,
                  avoidance_distance=3.0, reverse_steps=12, reverse_speed=0.75,
-                 avoidance_gain=1.5, cruise_speed=0.5, turn_speed=0.75,
-                 turn_timeout=40):
+                 avoidance_gain=1.5, cruise_speed=0.5, turn_speed=0.75):
         super().__init__()
         # Every Vehicle starts at the origin facing along +x. The only thing
         # that varies between repetitions is the random noise.
@@ -82,8 +80,6 @@ class Vehicle(Point):
             raise ValueError("cruise_speed must be in (0, 1]")
         if not 0 < turn_speed <= 1:
             raise ValueError("turn_speed must be in (0, 1]")
-        if turn_timeout < 1:
-            raise ValueError("turn_timeout must be at least 1")
         self.sensor_range = sensor_range
         self.avoidance_distance = avoidance_distance
         self.reverse_steps = reverse_steps
@@ -91,14 +87,18 @@ class Vehicle(Point):
         self.avoidance_gain = avoidance_gain
         self.cruise_speed = cruise_speed
         self.turn_speed = turn_speed
-        self.turn_timeout = turn_timeout
         self.left_distance = sensor_range
         self.right_distance = sensor_range
         self._reverse_steps_remaining = 0
         self._turning_to_clear = False
-        self._turn_steps = 0
+        self._scan_rotation = 0.0
+        self._scan_center_heading = 0.0
+        self._scan_phase = "sweep"
+        self._scan_best_distance = -1.0
+        self._scan_best_heading = 0.0
+        self._aligning_to_opening = False
+        self._opening_heading = 0.0
         self._turn_direction = 1
-        self._next_turn_direction = 1
 
         self.turn_gain   = turn_gain
         self.vel_gain    = 1 / 50       # converts average motor output to forward speed
@@ -158,25 +158,65 @@ class Vehicle(Point):
             self.left_motor = self.right_motor = -self.reverse_speed
             return
 
-        both_rays_clear = (
-            self.left_distance > self.avoidance_distance
-            and self.right_distance > self.avoidance_distance
-        )
-        both_rays_blocked = not both_rays_clear
-        if self._turning_to_clear and both_rays_clear:
-            self._turning_to_clear = False
-            self._turn_steps = 0
-        if both_rays_blocked and not self._turning_to_clear:
-            self._begin_avoidance_turn()
+        if self._aligning_to_opening:
+            heading_error = np.arctan2(
+                np.sin(self._opening_heading - self.orientation),
+                np.cos(self._opening_heading - self.orientation),
+            )
+            if abs(heading_error) > 0.08:
+                turn_direction = 1 if heading_error > 0 else -1
+                self.left_motor = self.turn_speed * turn_direction
+                self.right_motor = -self.turn_speed * turn_direction
+                return
+            self._aligning_to_opening = False
 
         if self._turning_to_clear:
-            self._turn_steps += 1
-            if self._turn_steps >= self.turn_timeout:
-                self._turn_steps = 0
-                self._turn_direction *= -1
-                self.reverse()
-                self.left_motor = self.right_motor = -self.reverse_speed
-                return
+            if self._scan_phase == "position":
+                scan_start = self._scan_center_heading - np.pi / 2
+                heading_error = np.arctan2(
+                    np.sin(scan_start - self.orientation),
+                    np.cos(scan_start - self.orientation),
+                )
+                if abs(heading_error) > 0.02:
+                    turn_direction = 1 if heading_error > 0 else -1
+                    turn_magnitude = self.turn_speed
+                    if self.turn_gain > 0:
+                        turn_magnitude = min(
+                            turn_magnitude,
+                            abs(heading_error) / (2 * self.turn_gain),
+                        )
+                    self.left_motor = turn_magnitude * turn_direction
+                    self.right_motor = -turn_magnitude * turn_direction
+                    return
+                self._scan_phase = "sweep"
+                self._scan_rotation = 0.0
+                self._turn_direction = 1
+
+            self._record_scan_opening()
+            remaining_rotation = np.pi - self._scan_rotation
+            if remaining_rotation <= 0.04:
+                self._turning_to_clear = False
+                if self._scan_best_distance <= self.avoidance_distance:
+                    self.reverse()
+                    self.left_motor = self.right_motor = -self.reverse_speed
+                    return
+                self._opening_heading = self._scan_best_heading
+                self._aligning_to_opening = True
+                return self.think()
+            turn_magnitude = self.turn_speed
+            if self.turn_gain > 0:
+                turn_magnitude = min(turn_magnitude, remaining_rotation / (2 * self.turn_gain))
+            self.left_motor = turn_magnitude * self._turn_direction
+            self.right_motor = -turn_magnitude * self._turn_direction
+            return
+
+        both_rays_blocked = (
+            self.left_distance <= self.avoidance_distance
+            and self.right_distance <= self.avoidance_distance
+        )
+        if both_rays_blocked and not self._turning_to_clear:
+            self._begin_avoidance_turn()
+            self._record_scan_opening()
             self.left_motor = self.turn_speed * self._turn_direction
             self.right_motor = -self.turn_speed * self._turn_direction
             return
@@ -200,6 +240,19 @@ class Vehicle(Point):
         right_hazard = float(np.clip(
             1.0 - self.right_distance / self.avoidance_distance, 0.0, 1.0
         ))
+        opening_difference = self.left_distance - self.right_distance
+        if abs(opening_difference) >= 0.25:
+            base_speed = max(
+                self.cruise_speed,
+                (float(left_motor) + float(right_motor)) / 2,
+            )
+            opening_turn = self.turn_speed * float(np.clip(
+                opening_difference / self.avoidance_distance, -1.0, 1.0
+            ))
+            self.left_motor = float(np.clip(base_speed + opening_turn, -1.0, 1.0))
+            self.right_motor = float(np.clip(base_speed - opening_turn, -1.0, 1.0))
+            return
+
         if max(left_hazard, right_hazard) == 0.0:
             left_motor = max(float(left_motor), self.cruise_speed)
             right_motor = max(float(right_motor), self.cruise_speed)
@@ -212,15 +265,22 @@ class Vehicle(Point):
 
 
     def _begin_avoidance_turn(self):
-        if self.left_distance < self.right_distance:
-            self._turn_direction = -1
-        elif self.right_distance < self.left_distance:
-            self._turn_direction = 1
-        else:
-            self._turn_direction = self._next_turn_direction
-            self._next_turn_direction *= -1
         self._turning_to_clear = True
-        self._turn_steps = 0
+        self._scan_rotation = 0.0
+        self._scan_center_heading = self.orientation
+        self._scan_phase = "position"
+        self._scan_best_distance = -1.0
+        self._scan_best_heading = self.orientation
+        self._turn_direction = -1
+        self._aligning_to_opening = False
+
+    def _record_scan_opening(self):
+        if self._scan_phase != "sweep":
+            return
+        best_distance = max(self.left_distance, self.right_distance)
+        if best_distance > self._scan_best_distance:
+            self._scan_best_distance = best_distance
+            self._scan_best_heading = self.orientation
 
     def reverse(self, steps=None):
         """Schedule a straight reverse burst for the next movement steps."""
@@ -240,6 +300,8 @@ class Vehicle(Point):
         prevents the vehicle from following a perfectly straight trajectory.
         """
         was_reversing = self._reverse_steps_remaining > 0
+        was_scanning = self._turning_to_clear
+        old_orientation = self.orientation
         noise = np.random.normal(0, self.noise_stdev)
         self.orientation += self.turn_gain * (self.left_motor - self.right_motor) + noise
         self.velocity = self.vel_gain * ((self.right_motor + self.left_motor) / 2)
@@ -256,6 +318,9 @@ class Vehicle(Point):
             self.update_sensor_pos()
         elif was_reversing:
             self._reverse_steps_remaining -= 1
+        elif was_scanning and self._scan_phase == "sweep":
+            angle_delta = (self.orientation - old_orientation + np.pi) % (2 * np.pi) - np.pi
+            self._scan_rotation += abs(angle_delta)
         return collided
 
     def distance(self, point):

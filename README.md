@@ -61,6 +61,9 @@ vehicle = world.vehicle
 ```
 
 Pass a custom `Maze` or `Vehicle` to `World` to change the layout or controller.
+When both forward rays are blocked, the vehicle scans a 180-degree forward arc,
+aligns with the heading that saw the greatest clearance, and then moves toward
+that opening; it does not select a route directly behind itself.
 
 ## Maze visualization
 
@@ -81,7 +84,7 @@ and reverse motion. A fitness-over-generations plot can be added separately.
 ## Fitness and MAP-Elites
 
 `evolution/fitness.py` scores a completed run using progress toward the maze
-goal, safe clearance from walls, wall-parallel movement, collisions, moving
+goal, safe clearance from walls, collisions, moving
 steps, stuck status, and goal completion. Collision costs increase after
 repeated impacts; useful path length and goal approach are rewarded, while
 movement away from the goal and getting stuck are penalized. Reaching the goal

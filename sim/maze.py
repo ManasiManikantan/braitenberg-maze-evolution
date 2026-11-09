@@ -220,56 +220,6 @@ class Maze:
 				clearances.append(math.hypot(x_pos - nearest_x, y_pos - nearest_y))
 		return min(clearances) - radius
 
-	def wall_following_score(
-		self,
-		start,
-		end,
-		radius=0.0,
-		follow_distance=2.5,
-		preferred_distance=1.0,
-	):
-		"""Score movement parallel to a nearby wall at a safe preferred gap."""
-		if radius < 0:
-			raise ValueError("radius must be non-negative")
-		if follow_distance <= 0:
-			raise ValueError("follow_distance must be positive")
-		if not 0 <= preferred_distance <= follow_distance:
-			raise ValueError("preferred_distance must be within follow_distance")
 
-		start_x, start_y = self._coordinates(start)
-		end_x, end_y = self._coordinates(end)
-		motion_x = end_x - start_x
-		motion_y = end_y - start_y
-		motion_length = math.hypot(motion_x, motion_y)
-		if motion_length == 0:
-			return 0.0
+__all__ = ["Maze"]
 
-		midpoint = ((start_x + end_x) / 2, (start_y + end_y) / 2)
-		segments = list(self.walls)
-		for obstacle in self.obstacles:
-			segments.extend(self._obstacle_walls(obstacle))
-
-		distance_scale = max(preferred_distance, follow_distance - preferred_distance)
-		best_score = 0.0
-		for segment in segments:
-			(start_wall_x, start_wall_y), (end_wall_x, end_wall_y) = segment
-			wall_x = end_wall_x - start_wall_x
-			wall_y = end_wall_y - start_wall_y
-			wall_length = math.hypot(wall_x, wall_y)
-			if wall_length == 0:
-				continue
-
-			clearance = math.sqrt(
-				self._point_segment_distance_squared(midpoint, segment)
-			) - radius
-			if clearance <= 0 or clearance > follow_distance:
-				continue
-			alignment = abs(
-				(motion_x * wall_x + motion_y * wall_y)
-				/ (motion_length * wall_length)
-			)
-			distance_score = max(
-				0.0, 1.0 - abs(clearance - preferred_distance) / distance_scale
-			)
-			best_score = max(best_score, alignment * distance_score)
-		return best_score

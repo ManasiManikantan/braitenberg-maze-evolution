@@ -33,23 +33,6 @@ class FitnessTests(unittest.TestCase):
 
         self.assertAlmostEqual(maze.clearance((0.0, 0.0), radius=0.5), 1.5)
 
-    def test_wall_following_prefers_parallel_safe_motion(self):
-        maze = Maze(
-            walls=[((0.0, -5.0), (0.0, 5.0))],
-            obstacles=[],
-            goal=(8.0, -7.0),
-            goal_radius=1.0,
-        )
-        alongside = maze.wall_following_score(
-            (1.0, -1.0), (1.0, 1.0), radius=0.25
-        )
-        toward_wall = maze.wall_following_score(
-            (1.0, -1.0), (3.0, -1.0), radius=0.25
-        )
-
-        self.assertGreater(alongside, 0.0)
-        self.assertEqual(toward_wall, 0.0)
-
     def test_safe_distance_score_rewards_more_clearance(self):
         near_wall = evaluate_fitness(self.make_world([(0.0, 0.0)]))
         farther_from_wall = evaluate_fitness(self.make_world([(-5.0, 0.0)]))

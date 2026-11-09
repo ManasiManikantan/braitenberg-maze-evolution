@@ -50,7 +50,9 @@ and obstacles; the evolved-robot example trains and runs on this harder layout.
 front and two from the robot's left/right body edges. Each reaches up to
 `sensor_range` maze units. Their distances are passed to the controller in
 left/front/right order. `left_distance`, `front_distance`, and `right_distance` hold
-the measured distances; the controller inputs are normalized proximity values
+the measured distances. Wall hits use a smaller safety margin than rectangular
+obstacles, so the robot can pass close to walls without cutting obstacle gaps
+too tightly. Controller inputs are normalized proximity values
 from 0 (no obstacle in range) to 1 (obstacle at the sensor).
 
 `World.step()` runs one sense-think-move cycle and prevents the vehicle body
@@ -137,7 +139,16 @@ completed, total, fitness)` receives an update after each controller finishes.
 `best_fitness` is best-so-far and cannot decrease; `generation_best_fitness`
 shows the best score in that generation. Default GA evaluation disables motion
 noise for consistent comparisons; set `evaluation_noise_stdev` to a positive
-value when noisy evaluation is desired.
+value when noisy evaluation is desired. If generation-best fitness stagnates,
+the mutation rate increases by 50% per generation up to 0.5, then resets after
+an improvement.
+Each fitness result includes `score_components`, so progress rewards, safety,
+collision costs, movement-time costs, and the goal bonus can be inspected
+separately instead of interpreting the total score alone. It also reports
+`coverage`, `unique_cells_visited`, and `path_revisits`; revisiting old grid
+cells is penalized while exploring new cells is rewarded. During a run, the
+world also requests a fresh forward scan when the robot re-enters a visited
+grid cell.
 
 ## Project layout
 

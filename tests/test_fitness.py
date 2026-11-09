@@ -78,6 +78,17 @@ class FitnessTests(unittest.TestCase):
         self.assertLess(oscillating["score"], progressing["score"])
         self.assertGreater(oscillating["goal_regression_distance"], 0.0)
 
+    def test_repeated_path_is_penalized_against_new_area(self):
+        loop = [(0.0, 0.0), (2.0, 0.0), (2.0, 2.0), (0.0, 2.0), (0.0, 0.0)]
+        looping_metrics = evaluate_fitness(self.make_world(loop * 4))
+        exploring_metrics = evaluate_fitness(
+            self.make_world([(0.0, 0.0), (2.0, 0.0), (4.0, 0.0), (6.0, 0.0)])
+        )
+
+        self.assertGreater(looping_metrics["path_revisits"], 0)
+        self.assertEqual(exploring_metrics["path_revisits"], 0)
+        self.assertLess(looping_metrics["score"], exploring_metrics["score"])
+
     def test_reaching_goal_receives_large_bonus(self):
         approaching_goal = self.make_world([(0.0, 0.0)])
         reached_goal = self.make_world([(0.0, 0.0), (8.0, -5.1)])
@@ -88,6 +99,16 @@ class FitnessTests(unittest.TestCase):
         self.assertEqual(reached_metrics["goal_bonus_awarded"], 5.0)
         self.assertLessEqual(reached_metrics["goal_center_error"], 2.0)
         self.assertAlmostEqual(reached_metrics["goal_overlap_margin"], 0.1)
+        self.assertAlmostEqual(
+            reached_metrics["score"], sum(reached_metrics["score_components"].values())
+        )
+
+    def test_movement_time_cost_is_small_and_reported(self):
+        world = self.make_world([(0.0, 0.0), (0.1, 0.0), (0.2, 0.0)])
+
+        metrics = evaluate_fitness(world)
+
+        self.assertAlmostEqual(metrics["score_components"]["movement_time"], -0.002)
 
     def test_goal_radius_edge_does_not_get_completion_bonus(self):
         world = self.make_world([(0.0, 0.0), (8.0, -4.9)])

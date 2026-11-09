@@ -10,7 +10,7 @@ class World:
 	"""Coordinate maze sensing, controller decisions, and vehicle motion."""
 
 	def __init__(self, maze=None, vehicle=None, goal=None, goal_radius=None,
-			 goal_tolerance=None):
+			 goal_tolerance=None, revisit_cell_size=1.0, revisit_trigger=2):
 		self.maze = Maze() if maze is None else maze
 		self.vehicle = Vehicle() if vehicle is None else vehicle
 		self.goal = self.maze.goal if goal is None else self._coordinates(goal)
@@ -23,10 +23,20 @@ class World:
 		)
 		if self.goal_tolerance <= 0:
 			raise ValueError("goal_tolerance must be positive")
+		if revisit_cell_size <= 0:
+			raise ValueError("revisit_cell_size must be positive")
+		if revisit_trigger < 2:
+			raise ValueError("revisit_trigger must be at least 2")
 		self.steps = 0
 		self.collisions = 0
 		self.moving_steps = 0
 		self.position_history = [(self.vehicle.x_pos, self.vehicle.y_pos)]
+		self.revisit_cell_size = revisit_cell_size
+		self.revisit_trigger = revisit_trigger
+		self.path_visit_counts = {}
+		self.path_revisits = 0
+		self._last_cell = self._path_cell(self.position_history[0])
+		self.path_visit_counts[self._last_cell] = 1
 		self.initial_distance = self._distance_to_goal(self.position_history[0])
 		self.reached_goal = self.initial_distance <= self.goal_tolerance
 
@@ -39,6 +49,26 @@ class World:
 	def _distance_to_goal(self, position):
 		position_x, position_y = self._coordinates(position)
 		return math.hypot(position_x - self.goal[0], position_y - self.goal[1])
+
+	def _path_cell(self, position):
+		position_x, position_y = self._coordinates(position)
+		column = int((position_x - self.maze.x_min) / self.revisit_cell_size)
+		row = int((position_y - self.maze.y_min) / self.revisit_cell_size)
+		return column, row
+
+	def _record_path_visit(self, position):
+		cell = self._path_cell(position)
+		if cell == self._last_cell:
+			return False
+
+		visits = self.path_visit_counts.get(cell, 0) + 1
+		self.path_visit_counts[cell] = visits
+		self._last_cell = cell
+		if visits >= self.revisit_trigger:
+			self.path_revisits += 1
+			self.vehicle.request_avoidance_scan()
+			return True
+		return False
 
 	def step(self):
 		"""Advance the simulation by one sense-think-move cycle."""
@@ -56,6 +86,8 @@ class World:
 		self.position_history.append(new_position)
 		self.steps += 1
 		self.reached_goal = self._distance_to_goal(new_position) <= self.goal_tolerance
+		if not self.reached_goal:
+			self._record_path_visit(new_position)
 		return self.vehicle
 
 	def run(self, steps):

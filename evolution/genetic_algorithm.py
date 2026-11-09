@@ -59,6 +59,8 @@ class GeneticAlgorithm:
 		self.population_size = population_size
 		self.hidden_size = hidden_size
 		self.mutation_rate = mutation_rate
+		self.current_mutation_rate = mutation_rate
+		self.stagnant_generations = 0
 		self.mutation_scale = mutation_scale
 		self.crossover_rate = crossover_rate
 		self.elite_count = elite_count
@@ -152,7 +154,7 @@ class GeneticAlgorithm:
 		mutated = np.asarray(genome, dtype=float).copy()
 		if mutated.shape != (self.genome_size,):
 			raise ValueError("genome has an invalid size")
-		mask = self.rng.random(self.genome_size) < self.mutation_rate
+		mask = self.rng.random(self.genome_size) < self.current_mutation_rate
 		mutated[mask] += self.rng.normal(0.0, self.mutation_scale, mask.sum())
 		return mutated
 
@@ -194,11 +196,21 @@ class GeneticAlgorithm:
 				)
 
 		best = max(self.population, key=lambda item: item.fitness)
+		if self.history and best.fitness <= self.history[-1]["generation_best_fitness"]:
+			self.stagnant_generations += 1
+		else:
+			self.stagnant_generations = 0
+		self.current_mutation_rate = min(
+			0.5,
+			self.mutation_rate * (1.0 + 0.5 * self.stagnant_generations),
+		)
 		self.history.append({
 			"generation": self.generation,
 			"best_fitness": self.best_individual.fitness,
 			"generation_best_fitness": best.fitness,
 			"mean_fitness": float(np.mean([item.fitness for item in self.population])),
+			"stagnant_generations": self.stagnant_generations,
+			"mutation_rate": self.current_mutation_rate,
 		})
 		return best
 

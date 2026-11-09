@@ -23,18 +23,29 @@ def _is_stuck(world, stuck_window, progress_tolerance):
 	return starting_distance - best_distance < progress_tolerance
 
 
-def _coverage(world, cell_size):
-	visited_cells = set()
+def _exploration_metrics(world, cell_size):
+	cell_path = []
 	for x_pos, y_pos in world.position_history:
 		column = int((x_pos - world.maze.x_min) / cell_size)
 		row = int((y_pos - world.maze.y_min) / cell_size)
-		visited_cells.add((column, row))
+		cell = (column, row)
+		if not cell_path or cell != cell_path[-1]:
+			cell_path.append(cell)
+
+	visited_cells = set()
+	path_revisits = 0
+	for cell in cell_path:
+		if cell in visited_cells:
+			path_revisits += 1
+		else:
+			visited_cells.add(cell)
 
 	total_cells = (
 		int((world.maze.width + cell_size - 1e-12) / cell_size)
 		* int((world.maze.height + cell_size - 1e-12) / cell_size)
 	)
-	return min(1.0, len(visited_cells) / total_cells)
+	coverage = min(1.0, len(visited_cells) / total_cells)
+	return coverage, len(visited_cells), path_revisits
 
 
 def evaluate_fitness(
@@ -50,11 +61,13 @@ def evaluate_fitness(
 	path_distance_cap=20.0,
 	collision_penalty=2.0,
 	repeated_collision_penalty=1.0,
-	moving_step_penalty=0.01,
+	moving_step_penalty=0.001,
 	stuck_penalty=20.0,
 	goal_bonus=5.0,
 	safe_distance=1.5,
 	safe_distance_weight=4.0,
+	exploration_weight=5.0,
+	revisit_penalty=0.5,
 ):
 	"""Score a completed ``World`` run and return metrics for analysis.
 
@@ -76,6 +89,8 @@ def evaluate_fitness(
 		raise ValueError("path_distance_cap must be positive")
 	if safe_distance <= 0:
 		raise ValueError("safe_distance must be positive")
+	if exploration_weight < 0 or revisit_penalty < 0:
+		raise ValueError("exploration weights must be non-negative")
 
 	final_position = world.position_history[-1]
 	final_distance = _distance_to_goal(final_position, world.goal)
@@ -105,7 +120,7 @@ def evaluate_fitness(
 	goal_bonus_awarded = goal_bonus if reached_goal else 0.0
 	goal_overlap_margin = world.goal_tolerance - final_distance
 	stuck = _is_stuck(world, stuck_window, progress_tolerance)
-	coverage = _coverage(world, cell_size)
+	coverage, unique_cells_visited, path_revisits = _exploration_metrics(world, cell_size)
 	clearances = [
 		world.maze.clearance(position, world.vehicle.radius)
 		for position in world.position_history
@@ -116,20 +131,24 @@ def evaluate_fitness(
 	) / len(clearances)
 	repeated_collision_cost = repeated_collision_penalty * max(0, world.collisions - 1)**2
 
-	score = (
-		progress_weight * progress
-		+ goal_approach_weight * goal_approach_distance
-		- goal_regression_penalty * goal_regression_distance
-		+ path_distance_weight * min(path_distance, path_distance_cap)
-		- collision_penalty * world.collisions
-		- repeated_collision_cost
-		- moving_step_penalty * world.moving_steps
-		- stuck_penalty * int(stuck)
-		+ safe_distance_weight * safe_distance_score
-		+ goal_bonus_awarded
-	)
+	score_components = {
+		"goal_progress": progress_weight * progress,
+		"goal_approach": goal_approach_weight * goal_approach_distance,
+		"goal_regression": -goal_regression_penalty * goal_regression_distance,
+		"travel": path_distance_weight * min(path_distance, path_distance_cap),
+		"collision": -collision_penalty * world.collisions,
+		"repeated_collision": -repeated_collision_cost,
+		"movement_time": -moving_step_penalty * world.moving_steps,
+		"stuck": -stuck_penalty * int(stuck),
+		"safe_clearance": safe_distance_weight * safe_distance_score,
+		"new_area": exploration_weight * coverage,
+		"revisited_path": -revisit_penalty * path_revisits,
+		"goal_completion": goal_bonus_awarded,
+	}
+	score = sum(score_components.values())
 	return {
 		"score": score,
+		"score_components": score_components,
 		"progress": progress,
 		"goal_approach_distance": goal_approach_distance,
 		"goal_regression_distance": goal_regression_distance,
@@ -149,6 +168,8 @@ def evaluate_fitness(
 		"mean_clearance": sum(clearances) / len(clearances),
 		"safe_distance_score": safe_distance_score,
 		"coverage": coverage,
+		"unique_cells_visited": unique_cells_visited,
+		"path_revisits": path_revisits,
 		"normalized_goal_progress": normalized_progress,
 		"behavior_descriptor": (coverage, normalized_progress),
 	}

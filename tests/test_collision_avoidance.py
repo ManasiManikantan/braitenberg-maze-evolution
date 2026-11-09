@@ -37,6 +37,36 @@ class CollisionAvoidanceTests(unittest.TestCase):
                 )
                 self.assertFalse(maze.collides(position, radius=1.0), position)
 
+    def test_reentering_a_path_cell_requests_a_new_scan(self):
+        maze = Maze(walls=[], obstacles=[], goal=(8.0, -7.0), goal_radius=1.0)
+        vehicle = Vehicle(noise_stdev=0)
+        world = World(maze=maze, vehicle=vehicle)
+
+        self.assertFalse(world._record_path_visit((1.0, 0.0)))
+        self.assertTrue(world._record_path_visit((0.0, 0.0)))
+        self.assertEqual(world.path_revisits, 1)
+        self.assertTrue(vehicle._turning_to_clear)
+
+    def test_raycasts_distinguish_walls_from_obstacles(self):
+        wall_maze = Maze(
+            walls=[((2.0, -2.0), (2.0, 2.0))],
+            obstacles=[],
+            goal=(8.0, -7.0),
+            goal_radius=1.0,
+        )
+        obstacle_maze = Maze(
+            walls=[],
+            obstacles=[(2.0, -1.0, 3.0, 1.0)],
+            goal=(8.0, -7.0),
+            goal_radius=1.0,
+        )
+
+        _, wall_kind = wall_maze.raycast_with_type((0.0, 0.0), (1.0, 0.0), 5.0)
+        _, obstacle_kind = obstacle_maze.raycast_with_type((0.0, 0.0), (1.0, 0.0), 5.0)
+
+        self.assertEqual(wall_kind, "wall")
+        self.assertEqual(obstacle_kind, "obstacle")
+
     def test_challenge_maze_has_body_clear_route_to_goal(self):
         maze = Maze(difficulty=2)
         route = [
@@ -135,7 +165,7 @@ class CollisionAvoidanceTests(unittest.TestCase):
 
     def test_front_obstacle_triggers_turn_in_place(self):
         maze = Maze(
-            walls=[((4.0, -5.0), (4.0, 5.0))],
+            walls=[((1.2, -5.0), (1.2, 5.0))],
             obstacles=[],
             goal=(8.0, -7.0),
             goal_radius=1.0,

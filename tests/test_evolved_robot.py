@@ -6,8 +6,8 @@ from sim.world import World
 from sim.visualization import animate_world
 
 # Evolve a small population
-generations = 15
-training_steps = 2000
+generations = 20
+training_steps = 3000
 
 
 def show_progress(generation, completed, total, fitness):
@@ -26,8 +26,10 @@ def make_challenge_world(controller):
 
 
 ga = GeneticAlgorithm(
-    population_size=20,
+    population_size=30,
     hidden_size=4,
+    mutation_rate=0.15,
+    mutation_scale=0.2,
     seed=42
 )
 
@@ -42,6 +44,9 @@ print("Best fitness:", best.fitness)
 print("Reached goal:", best.metrics["reached_goal"])
 print("Goal center error:", round(best.metrics["goal_center_error"], 3))
 print("Goal bonus:", best.metrics["goal_bonus_awarded"])
+print("Fitness breakdown:")
+for component, value in best.metrics["score_components"].items():
+    print(f"  {component}: {value:+.2f}")
 
 # Reconstruct the best neural network
 controller = ga.decode_genome(best.genome)
@@ -57,6 +62,6 @@ world = World(maze=Maze(difficulty=2), vehicle=robot)
 # Watch the evolved robot
 animation = animate_world(
     world,
-    steps=2000,
+    steps=3000,
     interval=30
 )

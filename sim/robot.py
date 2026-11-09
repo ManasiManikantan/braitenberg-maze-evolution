@@ -37,6 +37,7 @@ class Vehicle(Point):
                       orientation at each step.  Zero means no noise.
         sensor_range: Maximum sensor distance in maze units.
         avoidance_distance: Distance at which the reactive safety layer steers away.
+        wall_avoidance_distance: Clearance margin for fixed maze walls.
         reverse_steps: Number of steps in a collision-recovery reverse burst.
         collision_reverse_steps: Short reverse burst after first wall contact.
         reverse_speed: Absolute motor command used during reverse recovery.
@@ -53,7 +54,7 @@ class Vehicle(Point):
                  avoidance_distance=3.0, reverse_steps=12, collision_reverse_steps=3,
                  reverse_speed=0.75,
                  avoidance_gain=1.5, cruise_speed=0.5, turn_speed=0.75,
-                 goal_seek_distance=4.0):
+                 goal_seek_distance=4.0, wall_avoidance_distance=0.25):
         super().__init__()
         # Every Vehicle starts at the origin facing along +x. The only thing
         # that varies between repetitions is the random noise.
@@ -75,6 +76,8 @@ class Vehicle(Point):
             raise ValueError("avoidance_distance must be positive")
         if avoidance_distance > sensor_range:
             raise ValueError("avoidance_distance cannot exceed sensor_range")
+        if wall_avoidance_distance <= 0:
+            raise ValueError("wall_avoidance_distance must be positive")
         if reverse_steps < 1:
             raise ValueError("reverse_steps must be at least 1")
         if collision_reverse_steps < 1:
@@ -91,6 +94,7 @@ class Vehicle(Point):
             raise ValueError("goal_seek_distance must be positive")
         self.sensor_range = sensor_range
         self.avoidance_distance = avoidance_distance
+        self.wall_avoidance_distance = wall_avoidance_distance
         self.reverse_steps = reverse_steps
         self.collision_reverse_steps = collision_reverse_steps
         self.reverse_speed = reverse_speed
@@ -101,12 +105,15 @@ class Vehicle(Point):
         self.left_distance = sensor_range
         self.front_distance = sensor_range
         self.right_distance = sensor_range
+        self.left_hit_type = None
+        self.front_hit_type = None
+        self.right_hit_type = None
         self._reverse_steps_remaining = 0
         self._turning_to_clear = False
         self._scan_rotation = 0.0
         self._scan_center_heading = 0.0
         self._scan_phase = "sweep"
-        self._scan_best_distance = -1.0
+        self._scan_best_distance = -np.inf
         self._scan_best_heading = 0.0
         self._aligning_to_opening = False
         self._opening_heading = 0.0
@@ -116,7 +123,7 @@ class Vehicle(Point):
         self._turn_direction = 1
 
         self.turn_gain   = turn_gain
-        self.vel_gain    = 1 / 50       # converts average motor output to forward speed
+        self.vel_gain    = 1 / 15       # converts average motor output to forward speed
         self.noise_stdev = noise_stdev
         self.angle_offset = angle_offset
         self.wiring = wiring
@@ -158,17 +165,17 @@ class Vehicle(Point):
             maze: Maze providing a ``raycast`` method.
         """
         ray_direction = (np.cos(self.orientation), np.sin(self.orientation))
-        self.left_distance = maze.raycast(
+        self.left_distance, self.left_hit_type = maze.raycast_with_type(
             self.ls,
             ray_direction,
             self.sensor_range,
         )
-        self.front_distance = maze.raycast(
+        self.front_distance, self.front_hit_type = maze.raycast_with_type(
             self.fs,
             ray_direction,
             self.sensor_range,
         )
-        self.right_distance = maze.raycast(
+        self.right_distance, self.right_hit_type = maze.raycast_with_type(
             self.rs,
             ray_direction,
             self.sensor_range,
@@ -196,10 +203,19 @@ class Vehicle(Point):
                 )
                 self.goal_visible = distance_to_goal >= goal_distance - 1e-6
 
+    def _required_clearance(self, hit_type):
+        if hit_type == "wall":
+            return self.wall_avoidance_distance
+        return self.avoidance_distance
+
+    def _hazard(self, clearance, hit_type):
+        required_clearance = self._required_clearance(hit_type)
+        return float(np.clip(1.0 - clearance / required_clearance, 0.0, 1.0))
+
     def think(self):
         """Map sensors to motors, then apply a proximity-based safety override."""
         left_clearance = max(0.0, self.left_distance - self.radius)
-        front_clearance = max(0.0, self.front_distance - self.radius)
+        front_clearance = self.front_distance
         right_clearance = max(0.0, self.right_distance - self.radius)
         if self._reverse_steps_remaining > 0:
             self.left_motor = self.right_motor = -self.reverse_speed
@@ -215,15 +231,9 @@ class Vehicle(Point):
             turn = self.turn_speed * float(np.clip(
                 heading_error / (np.pi / 2), -1.0, 1.0
             ))
-            left_hazard = float(np.clip(
-                1.0 - left_clearance / self.avoidance_distance, 0.0, 1.0
-            ))
-            front_hazard = float(np.clip(
-                1.0 - front_clearance / self.avoidance_distance, 0.0, 1.0
-            ))
-            right_hazard = float(np.clip(
-                1.0 - right_clearance / self.avoidance_distance, 0.0, 1.0
-            ))
+            left_hazard = self._hazard(left_clearance, self.left_hit_type)
+            front_hazard = self._hazard(front_clearance, self.front_hit_type)
+            right_hazard = self._hazard(right_clearance, self.right_hit_type)
             self.left_motor = float(np.clip(
                 self.cruise_speed + turn - self.avoidance_gain * max(left_hazard, front_hazard),
                 -1.0,
@@ -274,7 +284,7 @@ class Vehicle(Point):
             remaining_rotation = np.pi - self._scan_rotation
             if remaining_rotation <= 0.04:
                 self._turning_to_clear = False
-                if self._scan_best_distance <= self.avoidance_distance:
+                if self._scan_best_distance <= 0.0:
                     self.reverse()
                     self.left_motor = self.right_motor = -self.reverse_speed
                     return
@@ -289,14 +299,11 @@ class Vehicle(Point):
             return
 
         both_rays_blocked = (
-            left_clearance <= self.avoidance_distance
-            and right_clearance <= self.avoidance_distance
+            left_clearance <= self._required_clearance(self.left_hit_type)
+            and right_clearance <= self._required_clearance(self.right_hit_type)
         )
-        front_blocked_without_side_opening = (
-            front_clearance <= self.avoidance_distance
-            and abs(left_clearance - right_clearance) < 0.25
-        )
-        if (both_rays_blocked or front_blocked_without_side_opening) and not self._turning_to_clear:
+        front_blocked = front_clearance <= self._required_clearance(self.front_hit_type)
+        if (both_rays_blocked or front_blocked) and not self._turning_to_clear:
             self._begin_avoidance_turn()
             self._record_scan_opening()
             self.left_motor = self.turn_speed * self._turn_direction
@@ -316,15 +323,9 @@ class Vehicle(Point):
         else:
             raise ValueError("wiring must be 'crossed' or 'direct'")
 
-        left_hazard = float(np.clip(
-            1.0 - left_clearance / self.avoidance_distance, 0.0, 1.0
-        ))
-        right_hazard = float(np.clip(
-            1.0 - right_clearance / self.avoidance_distance, 0.0, 1.0
-        ))
-        front_hazard = float(np.clip(
-            1.0 - front_clearance / self.avoidance_distance, 0.0, 1.0
-        ))
+        left_hazard = self._hazard(left_clearance, self.left_hit_type)
+        right_hazard = self._hazard(right_clearance, self.right_hit_type)
+        front_hazard = self._hazard(front_clearance, self.front_hit_type)
         opening_difference = left_clearance - right_clearance
         if abs(opening_difference) >= 0.25:
             base_speed = max(
@@ -354,20 +355,29 @@ class Vehicle(Point):
         self._scan_rotation = 0.0
         self._scan_center_heading = self.orientation
         self._scan_phase = "position"
-        self._scan_best_distance = -1.0
+        self._scan_best_distance = -np.inf
         self._scan_best_heading = self.orientation
         self._turn_direction = -1
         self._aligning_to_opening = False
 
+    def request_avoidance_scan(self):
+        """Cancel recovery motion and scan ahead after entering a known path cell."""
+        self._reverse_steps_remaining = 0
+        self._begin_avoidance_turn()
+
     def _record_scan_opening(self):
         if self._scan_phase != "sweep":
             return
-        best_distance = max(
-            0.0,
-            min(self.left_distance, self.right_distance) - self.radius,
+        left_margin = max(0.0, self.left_distance - self.radius) - self._required_clearance(
+            self.left_hit_type
         )
-        if best_distance > self._scan_best_distance:
-            self._scan_best_distance = best_distance
+        front_margin = self.front_distance - self._required_clearance(self.front_hit_type)
+        right_margin = max(0.0, self.right_distance - self.radius) - self._required_clearance(
+            self.right_hit_type
+        )
+        opening_margin = min(left_margin, front_margin, right_margin)
+        if opening_margin > self._scan_best_distance:
+            self._scan_best_distance = opening_margin
             self._scan_best_heading = self.orientation
 
     def reverse(self, steps=None):

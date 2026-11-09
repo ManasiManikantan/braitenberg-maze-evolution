@@ -147,6 +147,10 @@ class Maze:
 		``direction`` is normalized internally. If nothing is hit in range, the
 		returned distance is ``max_distance``.
 		"""
+		return self.raycast_with_type(origin, direction, max_distance)[0]
+
+	def raycast_with_type(self, origin, direction, max_distance):
+		"""Return nearest distance and hit type (``wall``, ``obstacle``, or None)."""
 		if max_distance <= 0:
 			raise ValueError("max_distance must be positive")
 
@@ -157,16 +161,20 @@ class Maze:
 			raise ValueError("ray direction must be non-zero")
 		direction = (direction_x / magnitude, direction_y / magnitude)
 
-		segments = list(self.walls)
-		for obstacle in self.obstacles:
-			segments.extend(self._obstacle_walls(obstacle))
-
 		nearest = float(max_distance)
-		for segment in segments:
+		nearest_type = None
+		for segment in self.walls:
 			hit_distance = self._ray_segment_distance(origin, direction, segment)
 			if hit_distance is not None and hit_distance < nearest:
 				nearest = hit_distance
-		return nearest
+				nearest_type = "wall"
+		for obstacle in self.obstacles:
+			for segment in self._obstacle_walls(obstacle):
+				hit_distance = self._ray_segment_distance(origin, direction, segment)
+				if hit_distance is not None and hit_distance < nearest:
+					nearest = hit_distance
+					nearest_type = "obstacle"
+		return nearest, nearest_type
 
 	@staticmethod
 	def _point_segment_distance_squared(point, segment):

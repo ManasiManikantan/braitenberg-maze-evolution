@@ -37,19 +37,78 @@ controller directly is equivalent to calling `forward`:
 motor_commands = controller((left_sensor, right_sensor))
 ```
 
-This network initializes random weights; training or evolution is not
-implemented yet.
+This network initializes random weights; the genetic algorithm below evolves
+those parameters.
+
+## Maze simulation
+
+`sim/maze.py` provides a centered rectangular maze with boundary and interior
+walls plus rectangular obstacles. `Vehicle.sense(maze)` casts two forward-facing
+rays, up to `sensor_range` maze units. `left_distance` and `right_distance` hold
+the measured distances; the controller inputs are normalized proximity values
+from 0 (no obstacle in range) to 1 (obstacle at the sensor).
+
+`World.step()` runs one sense-think-move cycle and prevents the vehicle body
+from crossing walls or obstacles:
+
+```python
+from sim.world import World
+
+world = World()
+world.run(1000)
+vehicle = world.vehicle
+```
+
+Pass a custom `Maze` or `Vehicle` to `World` to change the layout or controller.
+
+## Fitness and MAP-Elites
+
+`evolution/fitness.py` scores a completed run using progress toward the maze
+goal, collisions, moving steps, stuck status, and goal completion:
+
+```python
+from evolution.fitness import evaluate_fitness
+from sim.world import World
+
+world = World()
+world.run(1000)
+result = evaluate_fitness(world)
+score = result["score"]
+descriptor = result["behavior_descriptor"]
+```
+
+The descriptor is `(coverage, normalized_goal_progress)`. A MAP-Elites archive
+can bin those values and retain the highest-scoring controller in each cell,
+preserving diverse maze behaviors instead of only one overall winner. The
+archive is not implemented yet.
+
+## Genetic algorithm
+
+`evolution/genetic_algorithm.py` evolves a fixed-topology controller population
+with tournament selection, single-point crossover, Gaussian mutation, and
+elitist generational replacement:
+
+```python
+from evolution.genetic_algorithm import GeneticAlgorithm
+
+algorithm = GeneticAlgorithm(population_size=50, seed=7)
+best = algorithm.run(generations=20, steps=1000)
+best_controller = algorithm.decode_genome(best.genome)
+```
+
+Pass `world_factory(controller)` to `run()` to evaluate each controller in a
+custom maze or episode setup. `algorithm.history` records best and mean fitness
+for each evaluated generation.
 
 ## Project layout
 
 | Path | Description |
 | --- | --- |
 | `controller/network.py` | Two-sensor, two-motor feed-forward neural network |
-| `sim/robot.py` | Robot, point, and light simulation primitives |
-| `sim/maze.py` | Maze simulation module (not implemented yet) |
-| `sim/world.py` | World simulation module (not implemented yet) |
-| `evolution/fitness.py` | Fitness evaluation module (not implemented yet) |
+| `sim/robot.py` | Robot, distance sensors, and differential-drive motion |
+| `sim/maze.py` | Maze walls, obstacles, raycasting, and collision checks |
+| `sim/world.py` | Sense-think-move simulation loop |
+| `evolution/fitness.py` | Maze-run scoring and MAP-Elites behavior descriptors |
+| `evolution/genetic_algorithm.py` | Generational neural-controller evolution |
 
-There is not yet a complete runnable simulation or evolutionary training
-workflow. In particular, `Vehicle.think()` in `sim/robot.py` is not implemented
-and raises `NotImplementedError`.
+The MAP-Elites archive is not implemented yet.

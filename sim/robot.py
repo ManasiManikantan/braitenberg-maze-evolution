@@ -1,17 +1,10 @@
 """
 Braitenberg vehicle simulation.
 
-Defines the core building blocks for a light-seeking robot:
+Defines the core building blocks for a maze-navigation robot:
   - Point      : base class for any 2-D object with a position.
-  - Vehicle    : a two-wheeled robot with two light sensors and a differential drive.
-  - Light      : a stationary light source placed at a fixed distance from the origin.
-
-The vehicle's sensor-to-motor wiring is NOT implemented — that's Part 1 of
-the assignment (see Vehicle.think). Two schemes are worth trying:
-  - "crossed" (contralateral): left sensor -> right motor, right sensor ->
-    left motor. This produces light-seeking behavior.
-  - "direct" (ipsilateral): left sensor -> left motor, right sensor ->
-    right motor. This produces qualitatively different behavior.
+    - Vehicle    : a two-wheeled robot with two distance sensors and a differential drive.
+    - Light      : a legacy stationary point light source.
 """
 
 import numpy as np
@@ -31,37 +24,28 @@ class Point:
 
 
 class Vehicle(Point):
-    """A Braitenberg vehicle with two light sensors and differential drive motors.
+    """A differential-drive vehicle with two forward-facing distance sensors.
 
-    The vehicle body is modelled as a circle of given radius.  Two sensors are
-    mounted on the perimeter, symmetrically offset from the forward direction
-    by ±angle_offset radians.
+    The vehicle body is modelled as a circle. Two distance sensors are mounted
+    at the front of the body and angled symmetrically around its heading.
 
     Args:
-        angle_offset: Angular separation between each sensor and the vehicle's
-                      forward axis (radians).  π/2 places sensors at 90° on
-                      each side; smaller values move them closer to the front.
+        angle_offset: Angle between each sensor ray and the forward axis.
         turn_gain:    How strongly the sensor difference steers the vehicle.
                       Larger values produce sharper turns.
         noise_stdev:  Standard deviation of Gaussian noise added to the
                       orientation at each step.  Zero means no noise.
-        distance:     Initial distance to the light source; used to scale the
-                      sensor gain so that raw sensor values stay near [0, 1].
-        wiring:       Sensor-to-motor wiring scheme, only used if you
-                      implement the OPTIONAL advanced part of the
-                      assignment (a runtime switch in Vehicle.think).
-                      Otherwise unused. Default "crossed".
+        sensor_range: Maximum sensor distance in maze units.
+        wiring:       Sensor-to-motor mapping: "crossed" (default) or "direct".
+        controller:   Optional controller with a two-input, two-output API.
+        distance:     Legacy alias for sensor_range.
     """
 
-    def __init__(self, angle_offset=np.pi/2, turn_gain=0.1, noise_stdev=0.1, distance=10,
-                 wiring="crossed"):
+    def __init__(self, angle_offset=np.pi/6, turn_gain=0.1, noise_stdev=0.1,
+                 sensor_range=10, wiring="crossed", controller=None, distance=None):
         super().__init__()
-        # Every Vehicle starts at the origin facing along +x -- the same
-        # position and heading every repetition, every run. The Light is
-        # always placed along +x too (see Light below), so this is also
-        # always pointed directly at the light. The only thing that varies
-        # between repetitions is the random noise. Keep that in mind if
-        # you're ever tempted to run with noise_stdev=0.
+        # Every Vehicle starts at the origin facing along +x. The only thing
+        # that varies between repetitions is the random noise.
         self.orientation = 0.0          # heading angle (radians); starts pointing along +x
         self.velocity = 0.0             # forward speed (arbitrary units)
         self.radius = 1.0               # body radius; also the sensor arm length
@@ -71,20 +55,20 @@ class Vehicle(Point):
         self.left_motor   = 0.0        # left motor command
         self.right_motor  = 0.0        # right motor command
 
-        # Sensor gain: normalise raw distance so that a sensor at `distance`
-        # from the light reads approximately 0.5 (mid-range).
-        # This scales raw Euclidean distance into a convenient sensor range.
-        # Calibrated once, here, against the single light this Vehicle is
-        # constructed with -- if you extend the simulator with a second
-        # stimulus at a different distance (extra credit territory), it
-        # will be read on a scale calibrated for the first one.
-        self.sensor_gain = 1 / distance
+        if distance is not None:
+            sensor_range = distance
+        if sensor_range <= 0:
+            raise ValueError("sensor_range must be positive")
+        self.sensor_range = sensor_range
+        self.left_distance = sensor_range
+        self.right_distance = sensor_range
 
         self.turn_gain   = turn_gain
         self.vel_gain    = 1 / 50       # converts average motor output to forward speed
         self.noise_stdev = noise_stdev
         self.angle_offset = angle_offset
         self.wiring = wiring
+        self.controller = controller
 
         # Sensor positions as Point objects, updated every step
         self.rs = Point()   # right sensor
@@ -92,11 +76,13 @@ class Vehicle(Point):
         self.update_sensor_pos()
 
     def update_sensor_pos(self):
-        """Recompute the world-frame positions of both sensors from the body pose."""
-        self.rs.x_pos = self.x_pos + self.radius * np.cos(self.orientation + self.angle_offset)
-        self.rs.y_pos = self.y_pos + self.radius * np.sin(self.orientation + self.angle_offset)
-        self.ls.x_pos = self.x_pos + self.radius * np.cos(self.orientation - self.angle_offset)
-        self.ls.y_pos = self.y_pos + self.radius * np.sin(self.orientation - self.angle_offset)
+        """Recompute the front-left and front-right sensor origins."""
+        left_angle = self.orientation + self.angle_offset
+        right_angle = self.orientation - self.angle_offset
+        self.ls.x_pos = self.x_pos + self.radius * np.cos(left_angle)
+        self.ls.y_pos = self.y_pos + self.radius * np.sin(left_angle)
+        self.rs.x_pos = self.x_pos + self.radius * np.cos(right_angle)
+        self.rs.y_pos = self.y_pos + self.radius * np.sin(right_angle)
 
     def update_body_pos(self):
         """Advance the body one step along the current heading at the current velocity."""
@@ -104,52 +90,47 @@ class Vehicle(Point):
         self.y_pos += self.velocity * np.sin(self.orientation)
         self.update_sensor_pos()
 
-    def sense(self, light):
-        """Read light intensity at each sensor position.
+    def sense(self, maze):
+        """Read normalized proximity to the nearest wall or obstacle.
 
-        Intensity follows an inverse-distance law: it is 1.0 when the sensor
-        is at the light source and approaches 0 as distance grows.
+        Sensor values range from 0 (nothing detected within range) to 1
+        (an obstacle at the sensor origin). Raw distances are also exposed as
+        ``left_distance`` and ``right_distance``.
 
         Args:
-            light: A Light (or any Point) object representing the light source.
+            maze: Maze providing a ``raycast`` method.
         """
-        distance_right = self.sensor_gain * euclidean_distance(self.rs, light)
-        distance_left  = self.sensor_gain * euclidean_distance(self.ls, light)
-        self.right_sensor = 1.0 / (1.0 + distance_right)
-        self.left_sensor  = 1.0 / (1.0 + distance_left)
+        left_angle = self.orientation + self.angle_offset
+        right_angle = self.orientation - self.angle_offset
+        self.left_distance = maze.raycast(
+            self.ls,
+            (np.cos(left_angle), np.sin(left_angle)),
+            self.sensor_range,
+        )
+        self.right_distance = maze.raycast(
+            self.rs,
+            (np.cos(right_angle), np.sin(right_angle)),
+            self.sensor_range,
+        )
+        self.left_sensor = 1.0 - self.left_distance / self.sensor_range
+        self.right_sensor = 1.0 - self.right_distance / self.sensor_range
 
     def think(self):
-        """Map sensor activations to motor commands.
+        """Map sensor activations to motor commands using the selected wiring."""
+        if self.controller is not None:
+            self.left_motor, self.right_motor = self.controller.forward(
+                (self.left_sensor, self.right_sensor)
+            )
+        elif self.wiring == "crossed":
+            self.left_motor = self.right_sensor
+            self.right_motor = self.left_sensor
+        elif self.wiring == "direct":
+            self.left_motor = self.left_sensor
+            self.right_motor = self.right_sensor
+        else:
+            raise ValueError("wiring must be 'crossed' or 'direct'")
 
-        TODO (Part 1 of the assignment): implement the sensor-to-motor
-        wiring. Set self.left_motor and self.right_motor from
-        self.left_sensor and self.right_sensor.
-
-        Try a "crossed" (contralateral) wiring first: the left sensor
-        drives the right motor, and the right sensor drives the left
-        motor. Get the vehicle moving towards the light with this scheme
-        before doing anything else.
-
-        Once that works, try a "direct" (ipsilateral) wiring instead:
-        each sensor drives the motor on the SAME side of the body (left
-        sensor -> left motor, right sensor -> right motor). You can just
-        edit the lines below by hand and re-run the simulator to compare
-        the two behaviors.
-
-        OPTIONAL (advanced): instead of hand-editing this method every
-        time you want to switch schemes, use self.wiring (set in
-        __init__, default "crossed") to select between the two schemes
-        at runtime. A --wiring command-line flag is already wired up in
-        both sim.py and study.py (it just constructs Vehicle(...,
-        wiring=...)) — once think() reads self.wiring here, you can
-        switch schemes with a flag instead of touching the code.
-        """
-        raise NotImplementedError(
-            "Vehicle.think() is not implemented yet. See the TODO above "
-            "(Part 1 of the assignment)."
-        )
-
-    def move(self):
+    def move(self, maze=None):
         """Update orientation and velocity, then advance the body position.
 
         Differential drive kinematics:
@@ -162,11 +143,19 @@ class Vehicle(Point):
         noise = np.random.normal(0, self.noise_stdev)
         self.orientation += self.turn_gain * (self.left_motor - self.right_motor) + noise
         self.velocity = self.vel_gain * ((self.right_motor + self.left_motor) / 2)
+        old_position = (self.x_pos, self.y_pos)
         self.update_body_pos()
+        collided = maze is not None and maze.collides(
+            (self.x_pos, self.y_pos), self.radius
+        )
+        if collided:
+            self.x_pos, self.y_pos = old_position
+            self.update_sensor_pos()
+        return collided
 
-    def distance(self, light):
-        """Return the Euclidean distance from the vehicle body centre to the light."""
-        return euclidean_distance(self, light)
+    def distance(self, point):
+        """Return the Euclidean distance from the vehicle body centre to a point."""
+        return euclidean_distance(self, point)
 
 
 class Light(Point):

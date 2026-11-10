@@ -42,13 +42,25 @@ class Maze:
 		((1.0, 5.0, 2.0, 6.0)),
 		((8.7, 4.5, 9.3, 5.2)),
 	)
+	COURSE_FOUR_WALLS = (
+		((-3.0, -10.0), (-3.0, 6.0)),
+		((-3.0, 6.0), (7.0, 6.0)),
+		((7.0, 6.0), (7.0, -3.0)),
+		((1.0, -4.0), (7.0, -4.0)),
+	)
+	COURSE_FOUR_OBSTACLES = (
+		(-7.0, -7.0, -6.0, -6.0),
+		(-1.0, 3.0, 0.0, 4.0),
+		(3.0, 1.0, 4.0, 2.0),
+		(8.0, 3.0, 9.0, 4.0),
+	)
 
 	def __init__(self, width=20.0, height=20.0, walls=None, obstacles=None,
 			 goal=None, goal_radius=None, difficulty=1):
 		if width <= 0 or height <= 0:
 			raise ValueError("maze width and height must be positive")
-		if difficulty not in (1, 2, 3):
-			raise ValueError("difficulty must be 1, 2, or 3")
+		if difficulty not in (1, 2, 3, 4):
+			raise ValueError("difficulty must be 1, 2, 3, or 4")
 
 		self.width = float(width)
 		self.height = float(height)
@@ -65,6 +77,8 @@ class Maze:
 				layout_walls.extend(self.CHALLENGE_WALLS)
 			elif difficulty == 3:
 				layout_walls = list(self.COURSE_THREE_WALLS)
+			elif difficulty == 4:
+				layout_walls = list(self.COURSE_FOUR_WALLS)
 			self.interior_walls = [
 				((start[0] * x_scale, start[1] * y_scale),
 				 (end[0] * x_scale, end[1] * y_scale))
@@ -81,6 +95,8 @@ class Maze:
 				layout_obstacles.extend(self.CHALLENGE_OBSTACLES)
 			elif difficulty == 3:
 				layout_obstacles = list(self.COURSE_THREE_OBSTACLES)
+			elif difficulty == 4:
+				layout_obstacles = list(self.COURSE_FOUR_OBSTACLES)
 			self.obstacles = [
 				(x_min * x_scale, y_min * y_scale,
 				 x_max * x_scale, y_max * y_scale)
@@ -262,4 +278,3 @@ class Maze:
 
 
 __all__ = ["Maze"]
-

@@ -59,6 +59,28 @@ class CollisionAvoidanceTests(unittest.TestCase):
                 )
                 self.assertFalse(maze.collides(position, radius=1.0), position)
 
+    def test_course_four_has_body_clear_route_to_goal(self):
+        maze = Maze(difficulty=4)
+        route = [
+            (0.0, 0.0),
+            (-0.5, 0.0),
+            (-0.5, -5.5),
+            (8.0, -5.5),
+            (8.0, -7.0),
+            maze.goal,
+        ]
+
+        for start, end in zip(route, route[1:]):
+            distance = math.hypot(end[0] - start[0], end[1] - start[1])
+            samples = max(1, int(distance / 0.1))
+            for sample in range(samples + 1):
+                fraction = sample / samples
+                position = (
+                    start[0] + fraction * (end[0] - start[0]),
+                    start[1] + fraction * (end[1] - start[1]),
+                )
+                self.assertFalse(maze.collides(position, radius=1.0), position)
+
     def test_reentering_a_path_cell_requests_a_new_scan(self):
         maze = Maze(walls=[], obstacles=[], goal=(8.0, -7.0), goal_radius=1.0)
         vehicle = Vehicle(noise_stdev=0)

@@ -29,6 +29,7 @@ DIRECTNESS_THRESHOLD = 0.4
 EXPLORATION_THRESHOLD = 0.08
 EXPLORER_NEW_CELL_REWARD = 2.0
 DEFAULT_OUTPUT_DIR = Path("results")
+DEFAULT_PLOT_DIR = Path("test_output")
 
 
 class MapElites:
@@ -426,7 +427,7 @@ def main():
     parser.add_argument("--neural-only", action="store_true",
                         help="disable the hard-coded navigation heuristics")
     parser.add_argument("--seed", type=int, default=0)
-    parser.add_argument("--output", default=str(DEFAULT_OUTPUT_DIR / "map_elites_archive.png"))
+    parser.add_argument("--output", default=str(DEFAULT_PLOT_DIR / "map_elites_archive.png"))
     parser.add_argument("--save", default=str(DEFAULT_OUTPUT_DIR / "map_elites_archive.npz"))
     parser.add_argument("--evaluations-csv", default=str(DEFAULT_OUTPUT_DIR / "map_elites_evaluations.csv"),
                         help="every evaluated controller with its genome")
@@ -435,16 +436,17 @@ def main():
     parser.add_argument("--show", action="store_true")
     arguments = parser.parse_args()
 
-    default_paths = {
-        DEFAULT_OUTPUT_DIR / "map_elites_archive.png",
+    default_data_paths = {
         DEFAULT_OUTPUT_DIR / "map_elites_archive.npz",
         DEFAULT_OUTPUT_DIR / "map_elites_evaluations.csv",
         DEFAULT_OUTPUT_DIR / "map_elites_elites.csv",
     }
-    if any(Path(path) in default_paths for path in (
-        arguments.output, arguments.save, arguments.evaluations_csv, arguments.elites_csv,
+    if any(Path(path) in default_data_paths for path in (
+        arguments.save, arguments.evaluations_csv, arguments.elites_csv,
     )):
         DEFAULT_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    if Path(arguments.output) == DEFAULT_PLOT_DIR / "map_elites_archive.png":
+        DEFAULT_PLOT_DIR.mkdir(parents=True, exist_ok=True)
 
     archive = MapElites(
         difficulty=arguments.course,

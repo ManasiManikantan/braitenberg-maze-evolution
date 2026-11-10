@@ -125,9 +125,9 @@ The search seeds the archive with random controllers, then repeatedly picks
 elites from the archive, applies crossover and mutation, and inserts the child
 if it beats its cell's current elite. Archive score is the fitness score
 (clipped at -100) plus 100 for reaching the goal. By default, the run creates
-the `results` folder in the current working directory and writes:
+the `results` and `test_output` folders in the current working directory and writes:
 
-- `results/map_elites_archive.png`: a heatmap of best fitness per behavior cell (gold
+- `test_output/map_elites_archive.png`: a heatmap of best fitness per behavior cell (gold
   stars mark cells whose elite reaches the goal) beside the paths of the 12
   highest-fitness elites drawn on the maze.
 - `results/map_elites_archive.npz`: every elite's genome, cell, descriptor, and fitness
@@ -140,7 +140,7 @@ the `results` folder in the current working directory and writes:
 
 Later runs overwrite those default files. Override individual paths with
 `--output`, `--save`, `--evaluations-csv`, and `--elites-csv`; parent folders
-for custom paths must already exist. Visual test figures remain in `test_output`.
+for custom paths must already exist. Visual test figures also use `test_output`.
 
 Useful options: `--course 1-4`, `--bins 10 10`, `--coverage-range 0.03 0.2`,
 `--progress-max 0.85` (a robot stops once it overlaps the goal, so progress

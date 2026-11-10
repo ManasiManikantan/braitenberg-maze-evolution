@@ -33,7 +33,7 @@ class MapElitesTests(unittest.TestCase):
             subprocess.run(command, cwd=folder, env=env, check=True, capture_output=True)
             results = Path(folder) / "results"
             self.assertTrue((Path(folder) / "custom.png").is_file())
-            self.assertFalse((results / "map_elites_archive.png").exists())
+            self.assertFalse((Path(folder) / "test_output" / "map_elites_archive.png").exists())
             for name in (
                 "map_elites_archive.npz", "map_elites_evaluations.csv",
                 "map_elites_elites.csv",
@@ -41,7 +41,7 @@ class MapElitesTests(unittest.TestCase):
                 self.assertTrue((results / name).is_file())
             command = command[:-2]
             subprocess.run(command, cwd=folder, env=env, check=True, capture_output=True)
-            self.assertTrue((results / "map_elites_archive.png").is_file())
+            self.assertTrue((Path(folder) / "test_output" / "map_elites_archive.png").is_file())
 
     def test_cell_mapping_clips_to_grid_edges(self):
         archive = MapElites(bins=(10, 5), coverage_range=(0.0, 0.2), progress_max=1.0)

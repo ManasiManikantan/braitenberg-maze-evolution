@@ -143,6 +143,62 @@ never reaches 1.0), `--neural-only` (disable the hard-coded heuristics so the
 archive reflects only the network), `--show` (open the figure window), and
 `--seed`.
 
+### Exploring robot personalities
+
+Use the optional personality archive to preserve combinations of direct or
+exploratory routes and collision-free or collision-tolerant behavior:
+
+```bash
+python -m evolution.map_elites --personality --course 1 --evaluations 1500 --show
+```
+
+Each run can use up to 6,000 simulation cycles instead of the usual 3,000,
+allowing detours more time to finish. Override this with `--steps`; the robot
+still stops as soon as it reaches the goal.
+
+The horizontal axis measures **directness**: net progress toward the goal
+divided by distance traveled, clamped to 0–1 (zero when the robot does not
+move). The vertical axis counts actual simulated collision events; the top row
+groups counts at or above the last row's number. Collisions remain physically
+blocked by the simulator. In each cell, reaching the goal takes priority, then
+fitness selects the best controller. Personality-mode fitness removes the
+ordinary collision penalties so collision-heavy controllers can compete; other
+fitness terms and the goal bonus remain in place. In addition, explorer-labeled
+runs get 2 points per unique maze cell visited, on top of the existing coverage
+reward. The base fitness still penalizes each re-entry into a previously visited
+cell by 0.5 points; there is no extra explorer-specific revisit penalty. The
+new-area bonus is applied after the score floor and goal bonus. Goal-reaching
+runs still take priority in each cell, and the normal mode is unchanged.
+
+The cells used for these metrics are 1-by-1 maze units. Staying in the same
+cell for consecutive steps does not count as a revisit; leaving and coming
+back does. This approximates path overlap rather than measuring exact line
+crossings. The CSV and NPZ outputs include the unique-cell count, revisit count,
+and exploration adjustment so you can compare runs. The gallery also shows
+the cell and revisit counts for each representative.
+
+The gallery shows only the best available path for each distinct observed label:
+
+- **direct**: reached the goal with directness at least 0.4.
+- **explorer**: not direct, but visited enough distinct maze cells to reach the
+  coverage threshold of 0.08 (8% of the maze's grid cells).
+- **limited exploration**: neither of the above; this can include a robot that
+  hardly moved.
+- Each is combined with **collision-free** (zero impacts) or
+  **collision-tolerant** (one or more impacts). Unfinished runs are marked.
+
+These are labels of observed behavior, not evidence of intent or guarantees
+about future runs. A collision-free run is not necessarily cautious, and a
+collision-tolerant run is not guaranteed to reach the goal. The search may not
+find every combination; these fixed thresholds are rough guides and may need
+adjustment for different courses. The hard-coded avoidance and goal-seeking heuristics can
+also influence the paths; `--neural-only` disables them for comparison.
+
+The CSV and NPZ outputs include directness, coverage, goal progress, collision
+counts, and genomes. NPZ descriptors are `(directness, collisions)` in
+personality mode and `(coverage, progress)` otherwise. Use separate output paths
+to keep both runs; the default filenames are the same in either mode.
+
 ## Genetic algorithm
 
 `evolution/genetic_algorithm.py` evolves a fixed-topology controller population

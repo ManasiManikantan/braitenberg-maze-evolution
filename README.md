@@ -113,10 +113,35 @@ score = result["score"]
 descriptor = result["behavior_descriptor"]
 ```
 
-The descriptor is `(coverage, normalized_goal_progress)`. A MAP-Elites archive
-can bin those values and retain the highest-scoring controller in each cell,
-preserving diverse maze behaviors instead of only one overall winner. The
-archive is not implemented yet.
+The descriptor is `(coverage, normalized_goal_progress)`. `evolution/map_elites.py`
+bins those values into a grid and keeps the highest-scoring controller in each
+cell, preserving diverse maze behaviors instead of only one overall winner:
+
+```bash
+python -m evolution.map_elites --course 1 --evaluations 1500
+```
+
+The search seeds the archive with random controllers, then repeatedly picks
+elites from the archive, applies crossover and mutation, and inserts the child
+if it beats its cell's current elite. Archive score is the fitness score
+(clipped at -100) plus 100 for reaching the goal. The run writes:
+
+- `map_elites_archive.png`: a heatmap of best fitness per behavior cell (gold
+  stars mark cells whose elite reaches the goal) beside the paths of the 12
+  highest-fitness elites drawn on the maze.
+- `map_elites_archive.npz`: every elite's genome, cell, descriptor, and fitness
+  so controllers can be replayed.
+- `map_elites_evaluations.csv`: every controller evaluated (not just the
+  winners), with its cell, descriptor, fitness, goal success, collisions,
+  completion steps, path length, whether it entered the archive, and its genome
+  as `gene_0`..`gene_25`. This is the full dataset for later training or analysis.
+- `map_elites_elites.csv`: the same columns for just the final archive.
+
+Useful options: `--course 1-4`, `--bins 10 10`, `--coverage-range 0.03 0.2`,
+`--progress-max 0.85` (a robot stops once it overlaps the goal, so progress
+never reaches 1.0), `--neural-only` (disable the hard-coded heuristics so the
+archive reflects only the network), `--show` (open the figure window), and
+`--seed`.
 
 ## Genetic algorithm
 
@@ -173,7 +198,10 @@ the neural controller's contribution from existing hand-coded behavior. CSV
 rows include goal success, collision count, completion steps (blank when the
 goal was not reached), path length, fitness, course, controller, and seed. The
 runner reports aggregate success rates and whether each reaches the 80%
-goal-success target. Results are saved to `experiment_results.csv`.
+goal-success target. Results are saved to `experiment_results.csv`. The study
+also saves each seed's random and evolved controller genomes to
+`experiment_genomes.npz` (keys like `evolved_seed0`) and the per-generation
+training curve to `experiment_training_history.csv`.
 
 Workload and output can be adjusted:
 
@@ -193,5 +221,4 @@ python tests/test_evolved_robot.py --seeds 3 --generations 10 --steps 5000 --noi
 | `evolution/fitness.py` | Maze-run scoring and MAP-Elites behavior descriptors |
 | `evolution/genetic_algorithm.py` | Generational neural-controller evolution |
 | `evolution/experiment.py` | Reproducible baseline, validation, and ablation study |
-
-The MAP-Elites archive is not implemented yet.
+| `evolution/map_elites.py` | MAP-Elites archive search and visualization |

@@ -4,6 +4,8 @@ import argparse
 import csv
 from pathlib import Path
 
+import numpy as np
+
 from evolution.fitness import evaluate_fitness
 from evolution.genetic_algorithm import GeneticAlgorithm
 from sim.maze import Maze
@@ -20,6 +22,15 @@ TRAINING_NOISE_SEED_BASE = 900000
 SUCCESS_BONUS = 100.0
 SPEED_BONUS = 50.0
 COLLISION_SCORE_FLOOR = -100.0
+HISTORY_FIELDS = (
+    "training_seed",
+    "generation",
+    "best_fitness",
+    "generation_best_fitness",
+    "mean_fitness",
+    "stagnant_generations",
+    "mutation_rate",
+)
 RESULT_FIELDS = (
     "training_seed",
     "controller",
@@ -220,6 +231,15 @@ def print_summary(records, course_group=None):
             print(f"    80% goal-success target: {target}")
 
 
+def write_training_artifacts(genomes_path, history_path, genomes, history_rows):
+    """Persist controller genomes (for reuse/training) and GA progress."""
+    np.savez(genomes_path, **genomes)
+    with Path(history_path).open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.DictWriter(handle, fieldnames=HISTORY_FIELDS)
+        writer.writeheader()
+        writer.writerows(history_rows)
+
+
 def run_experiment(
     seeds=DEFAULT_SEEDS,
     generations=DEFAULT_GENERATIONS,
@@ -227,9 +247,13 @@ def run_experiment(
     steps=DEFAULT_STEPS,
     noise_stdev=DEFAULT_NOISE_STDEV,
     output_path="experiment_results.csv",
+    genomes_path="experiment_genomes.npz",
+    history_path="experiment_training_history.csv",
 ):
     courses = make_evaluation_courses()
     records = []
+    genomes = {}
+    history_rows = []
 
     for training_seed in range(seeds):
         algorithm = GeneticAlgorithm(
@@ -240,6 +264,7 @@ def run_experiment(
             seed=training_seed,
             fitness_function=evaluate_course_set,
         )
+        genomes[f"random_seed{training_seed}"] = algorithm.population[0].genome.copy()
         random_controller = algorithm.decode_genome(
             algorithm.population[0].genome
         )
@@ -270,6 +295,11 @@ def run_experiment(
             ),
         )
         evolved_controller = algorithm.decode_genome(best.genome)
+        genomes[f"evolved_seed{training_seed}"] = best.genome.copy()
+        history_rows.extend(
+            {"training_seed": training_seed, **row} for row in algorithm.history
+        )
+        write_training_artifacts(genomes_path, history_path, genomes, history_rows)
         print(f"  Best mean training fitness: {best.fitness:.2f}")
 
         for name, controller, mode in (
@@ -291,6 +321,8 @@ def run_experiment(
 
     print_summary(records)
     print(f"\nDetailed episode results written to {Path(output_path).resolve()}")
+    print(f"Controller genomes written to {Path(genomes_path).resolve()}")
+    print(f"Training history written to {Path(history_path).resolve()}")
     return records
 
 
@@ -302,6 +334,8 @@ def main():
     parser.add_argument("--steps", type=int, default=DEFAULT_STEPS)
     parser.add_argument("--noise-stdev", type=float, default=DEFAULT_NOISE_STDEV)
     parser.add_argument("--output", default="experiment_results.csv")
+    parser.add_argument("--genomes-output", default="experiment_genomes.npz")
+    parser.add_argument("--history-output", default="experiment_training_history.csv")
     arguments = parser.parse_args()
     if arguments.seeds < 1:
         parser.error("--seeds must be at least 1")
@@ -320,6 +354,8 @@ def main():
         steps=arguments.steps,
         noise_stdev=arguments.noise_stdev,
         output_path=arguments.output,
+        genomes_path=arguments.genomes_output,
+        history_path=arguments.history_output,
     )
 
 

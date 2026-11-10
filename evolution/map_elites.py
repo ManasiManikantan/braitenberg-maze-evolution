@@ -6,6 +6,7 @@ keeps the single best controller found with that behavior.
 """
 
 import argparse
+import csv
 from pathlib import Path
 
 import numpy as np
@@ -68,6 +69,7 @@ class MapElites:
         self.evaluations = 0
         self.steps = 3000
         self.history = []
+        self.evaluation_log = []
 
     def cell_for(self, descriptor):
         """Map a (coverage, progress) descriptor to integer grid coordinates."""
@@ -111,10 +113,11 @@ class MapElites:
         self.evaluations += 1
         cell = self.cell_for(elite["descriptor"])
         incumbent = self.archive.get(cell)
-        if incumbent is None or elite["fitness"] > incumbent["fitness"]:
+        inserted = incumbent is None or elite["fitness"] > incumbent["fitness"]
+        self.evaluation_log.append((self.evaluations, cell, inserted, elite))
+        if inserted:
             self.archive[cell] = elite
-            return True
-        return False
+        return inserted
 
     def run(self, evaluations=1000, initial=50, steps=3000, log_every=100):
         self.steps = steps
@@ -152,6 +155,49 @@ class MapElites:
             "best_fitness": max((e["fitness"] for e in elites), default=float("nan")),
             "solving_cells": sum(e["reached_goal"] for e in elites),
         }
+
+    def save_csv(self, path, evaluated=True):
+        """Write one row per evaluation (or per archive elite) with its genome.
+
+        Each row has the behavior cell, descriptor, fitness, outcome metrics,
+        and the genome as columns ``gene_0``..``gene_N``, so the file can be
+        loaded directly as training data or to rebuild controllers.
+        """
+        if evaluated:
+            rows = self.evaluation_log
+        else:
+            rows = [
+                (None, cell, True, elite)
+                for cell, elite in sorted(self.archive.items())
+            ]
+        gene_names = [f"gene_{i}" for i in range(self.ga.genome_size)]
+        fields = [
+            "evaluation", "course", "cell_column", "cell_row", "inserted",
+            "coverage", "goal_progress", "fitness", "goal_success",
+            "collision_count", "completion_steps", "path_length", *gene_names,
+        ]
+        with Path(path).open("w", newline="", encoding="utf-8") as handle:
+            writer = csv.DictWriter(handle, fieldnames=fields)
+            writer.writeheader()
+            for evaluation, cell, inserted, elite in rows:
+                writer.writerow({
+                    "evaluation": evaluation,
+                    "course": self.difficulty,
+                    "cell_column": cell[0],
+                    "cell_row": cell[1],
+                    "inserted": int(inserted),
+                    "coverage": elite["descriptor"][0],
+                    "goal_progress": elite["descriptor"][1],
+                    "fitness": elite["fitness"],
+                    "goal_success": int(elite["reached_goal"]),
+                    "collision_count": elite["collisions"],
+                    "completion_steps": (
+                        "" if elite["completion_steps"] is None
+                        else elite["completion_steps"]
+                    ),
+                    "path_length": elite["path_length"],
+                    **dict(zip(gene_names, elite["genome"])),
+                })
 
     def save(self, path):
         """Store every elite's genome and behavior so controllers can be replayed."""
@@ -258,6 +304,10 @@ def main():
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--output", default="map_elites_archive.png")
     parser.add_argument("--save", default="map_elites_archive.npz")
+    parser.add_argument("--evaluations-csv", default="map_elites_evaluations.csv",
+                        help="every evaluated controller with its genome")
+    parser.add_argument("--elites-csv", default="map_elites_elites.csv",
+                        help="the final archive: best controller per cell")
     parser.add_argument("--show", action="store_true")
     arguments = parser.parse_args()
 
@@ -277,6 +327,13 @@ def main():
         steps=arguments.steps,
     )
     archive.save(arguments.save)
+    archive.save_csv(arguments.evaluations_csv, evaluated=True)
+    archive.save_csv(arguments.elites_csv, evaluated=False)
+    print(
+        f"Saved {arguments.save}, {arguments.evaluations_csv} "
+        f"({len(archive.evaluation_log)} evaluations), {arguments.elites_csv} "
+        f"({len(archive.archive)} elites)"
+    )
     plot_archive(archive, arguments.output, show=arguments.show)
 
 

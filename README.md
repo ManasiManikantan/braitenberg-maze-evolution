@@ -44,9 +44,8 @@ those parameters.
 ## Maze simulation
 
 `sim/maze.py` provides a centered rectangular maze with boundary and interior
-walls plus rectangular obstacles. Use `Maze(difficulty=2)` or
-`Maze(difficulty=3)` for added barriers and obstacles; the evolved-robot example
-trains and runs on course 3.
+walls plus rectangular obstacles. `Maze(difficulty=1)` through
+`Maze(difficulty=4)` select the four built-in courses.
 `Vehicle.sense(maze)` casts three parallel, forward-facing rays: one from the
 front and two from the robot's left/right body edges. Each reaches up to
 `sensor_range` maze units. Their distances are passed to the controller in
@@ -152,6 +151,36 @@ world requests a fresh forward scan when the robot re-enters a visited grid
 cell or makes no meaningful goal progress for 80 steps (configurable via
 `World.stagnation_limit` and `World.progress_tolerance`).
 
+## Reproducible controller study
+
+Run the study from the project root:
+
+```bash
+python tests/test_evolved_robot.py
+```
+
+By default, the study trains three independent genetic-algorithm runs (10
+generations, population 30, and 5,000 steps per course). Each run evaluates a
+randomly initialized neural controller on all four training courses and saves
+those baseline measurements before evolution begins. The evolved controller
+is then evaluated on the same courses and two held-out layouts, with seeded
+movement noise (standard deviation 0.05).
+
+The study also evaluates the random and evolved neural controllers with the
+built-in goal-seeking and obstacle-avoidance heuristics disabled, plus a
+heuristic-only robot without a neural controller. This ablation distinguishes
+the neural controller's contribution from existing hand-coded behavior. CSV
+rows include goal success, collision count, completion steps (blank when the
+goal was not reached), path length, fitness, course, controller, and seed. The
+runner reports aggregate success rates and whether each reaches the 80%
+goal-success target. Results are saved to `experiment_results.csv`.
+
+Workload and output can be adjusted:
+
+```bash
+python tests/test_evolved_robot.py --seeds 3 --generations 10 --steps 5000 --noise-stdev 0.05 --output experiment_results.csv
+```
+
 ## Project layout
 
 | Path | Description |
@@ -163,5 +192,6 @@ cell or makes no meaningful goal progress for 80 steps (configurable via
 | `sim/visualization.py` | Live maze and robot animation |
 | `evolution/fitness.py` | Maze-run scoring and MAP-Elites behavior descriptors |
 | `evolution/genetic_algorithm.py` | Generational neural-controller evolution |
+| `evolution/experiment.py` | Reproducible baseline, validation, and ablation study |
 
 The MAP-Elites archive is not implemented yet.

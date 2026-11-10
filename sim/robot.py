@@ -54,7 +54,8 @@ class Vehicle(Point):
                  avoidance_distance=3.0, reverse_steps=12, collision_reverse_steps=3,
                  reverse_speed=0.75,
                  avoidance_gain=1.5, cruise_speed=0.5, turn_speed=0.75,
-                 goal_seek_distance=4.0, wall_avoidance_distance=0.25):
+                 goal_seek_distance=4.0, wall_avoidance_distance=0.25,
+                 navigation_heuristics=True, noise_seed=None):
         super().__init__()
         # Every Vehicle starts at the origin facing along +x. The only thing
         # that varies between repetitions is the random noise.
@@ -102,6 +103,8 @@ class Vehicle(Point):
         self.cruise_speed = cruise_speed
         self.turn_speed = turn_speed
         self.goal_seek_distance = goal_seek_distance
+        self.navigation_heuristics = navigation_heuristics
+        self._noise_rng = np.random.default_rng(noise_seed)
         self.left_distance = sensor_range
         self.front_distance = sensor_range
         self.right_distance = sensor_range
@@ -217,11 +220,15 @@ class Vehicle(Point):
         left_clearance = max(0.0, self.left_distance - self.radius)
         front_clearance = self.front_distance
         right_clearance = max(0.0, self.right_distance - self.radius)
-        if self._reverse_steps_remaining > 0:
+        if self.navigation_heuristics and self._reverse_steps_remaining > 0:
             self.left_motor = self.right_motor = -self.reverse_speed
             return
 
-        if self.goal_visible and self._goal_distance <= self.goal_seek_distance:
+        if (
+            self.navigation_heuristics
+            and self.goal_visible
+            and self._goal_distance <= self.goal_seek_distance
+        ):
             self._turning_to_clear = False
             self._aligning_to_opening = False
             heading_error = np.arctan2(
@@ -246,7 +253,7 @@ class Vehicle(Point):
             ))
             return
 
-        if self._aligning_to_opening:
+        if self.navigation_heuristics and self._aligning_to_opening:
             heading_error = np.arctan2(
                 np.sin(self._opening_heading - self.orientation),
                 np.cos(self._opening_heading - self.orientation),
@@ -258,7 +265,7 @@ class Vehicle(Point):
                 return
             self._aligning_to_opening = False
 
-        if self._turning_to_clear:
+        if self.navigation_heuristics and self._turning_to_clear:
             if self._scan_phase == "position":
                 scan_start = self._scan_center_heading - np.pi / 2
                 heading_error = np.arctan2(
@@ -303,7 +310,11 @@ class Vehicle(Point):
             and right_clearance <= self._required_clearance(self.right_hit_type)
         )
         front_blocked = front_clearance <= self._required_clearance(self.front_hit_type)
-        if (both_rays_blocked or front_blocked) and not self._turning_to_clear:
+        if (
+            self.navigation_heuristics
+            and (both_rays_blocked or front_blocked)
+            and not self._turning_to_clear
+        ):
             self._begin_avoidance_turn()
             self._record_scan_opening()
             self.left_motor = self.turn_speed * self._turn_direction
@@ -322,6 +333,11 @@ class Vehicle(Point):
             right_motor = self.right_sensor
         else:
             raise ValueError("wiring must be 'crossed' or 'direct'")
+
+        if not self.navigation_heuristics:
+            self.left_motor = float(np.clip(left_motor, -1.0, 1.0))
+            self.right_motor = float(np.clip(right_motor, -1.0, 1.0))
+            return
 
         left_hazard = self._hazard(left_clearance, self.left_hit_type)
         right_hazard = self._hazard(right_clearance, self.right_hit_type)
@@ -362,6 +378,8 @@ class Vehicle(Point):
 
     def request_avoidance_scan(self):
         """Cancel recovery motion and scan ahead after entering a known path cell."""
+        if not self.navigation_heuristics:
+            return
         self._reverse_steps_remaining = 0
         self._begin_avoidance_turn()
 
@@ -400,7 +418,7 @@ class Vehicle(Point):
         was_reversing = self._reverse_steps_remaining > 0
         was_scanning = self._turning_to_clear
         old_orientation = self.orientation
-        noise = np.random.normal(0, self.noise_stdev)
+        noise = self._noise_rng.normal(0, self.noise_stdev)
         self.orientation += self.turn_gain * (self.left_motor - self.right_motor) + noise
         self.velocity = self.vel_gain * ((self.right_motor + self.left_motor) / 2)
         old_position = (self.x_pos, self.y_pos)
@@ -414,7 +432,7 @@ class Vehicle(Point):
             if was_reversing:
                 self._reverse_steps_remaining = 0
                 self._begin_avoidance_turn()
-            else:
+            elif self.navigation_heuristics:
                 self._reverse_steps_remaining = 0
                 self._turning_to_clear = False
                 self._aligning_to_opening = False

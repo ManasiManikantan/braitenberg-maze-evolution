@@ -124,18 +124,23 @@ python -m evolution.map_elites --course 1 --evaluations 1500
 The search seeds the archive with random controllers, then repeatedly picks
 elites from the archive, applies crossover and mutation, and inserts the child
 if it beats its cell's current elite. Archive score is the fitness score
-(clipped at -100) plus 100 for reaching the goal. The run writes:
+(clipped at -100) plus 100 for reaching the goal. By default, the run creates
+the `results` folder in the current working directory and writes:
 
-- `map_elites_archive.png`: a heatmap of best fitness per behavior cell (gold
+- `results/map_elites_archive.png`: a heatmap of best fitness per behavior cell (gold
   stars mark cells whose elite reaches the goal) beside the paths of the 12
   highest-fitness elites drawn on the maze.
-- `map_elites_archive.npz`: every elite's genome, cell, descriptor, and fitness
+- `results/map_elites_archive.npz`: every elite's genome, cell, descriptor, and fitness
   so controllers can be replayed.
-- `map_elites_evaluations.csv`: every controller evaluated (not just the
+- `results/map_elites_evaluations.csv`: every controller evaluated (not just the
   winners), with its cell, descriptor, fitness, goal success, collisions,
   completion steps, path length, whether it entered the archive, and its genome
   as `gene_0`..`gene_25`. This is the full dataset for later training or analysis.
-- `map_elites_elites.csv`: the same columns for just the final archive.
+- `results/map_elites_elites.csv`: the same columns for just the final archive.
+
+Later runs overwrite those default files. Override individual paths with
+`--output`, `--save`, `--evaluations-csv`, and `--elites-csv`; parent folders
+for custom paths must already exist. Visual test figures remain in `test_output`.
 
 Useful options: `--course 1-4`, `--bins 10 10`, `--coverage-range 0.03 0.2`,
 `--progress-max 0.85` (a robot stops once it overlaps the goal, so progress

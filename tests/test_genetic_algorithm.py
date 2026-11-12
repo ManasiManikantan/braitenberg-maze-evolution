@@ -51,6 +51,16 @@ class GeneticAlgorithmTests(unittest.TestCase):
         self.assertEqual(best_history, [1.0, 1.0])
         self.assertEqual(generation_history, [1.0, -22.0])
 
+    def test_default_world_is_network_only(self):
+        algorithm = GeneticAlgorithm(population_size=4, seed=1)
+        controller = algorithm.decode_genome(algorithm.population[0].genome)
+        world = algorithm._default_world_factory(controller)
+        self.assertFalse(world.vehicle.navigation_heuristics)
+
+        with_rules = GeneticAlgorithm(population_size=4, seed=1, network_only=False)
+        world = with_rules._default_world_factory(controller)
+        self.assertTrue(world.vehicle.navigation_heuristics)
+
 
 if __name__ == "__main__":
     unittest.main()

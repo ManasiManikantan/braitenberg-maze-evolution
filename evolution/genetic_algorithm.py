@@ -24,6 +24,10 @@ class GeneticAlgorithm:
 	hidden-output weights, and output biases. Fitness is evaluated by creating
 	a fresh ``World`` for each controller, using ``world_factory(controller)``
 	when a custom maze or episode setup is needed.
+
+	With ``network_only=True`` (the default) the default world disables the
+	hand-coded navigation heuristics, so the evolved network is the only
+	controller. Set it to ``False`` to evolve inside the rule-based layer.
 	"""
 
 	def __init__(
@@ -38,6 +42,7 @@ class GeneticAlgorithm:
 		seed=None,
 		fitness_function=None,
 		evaluation_noise_stdev=0.0,
+		network_only=True,
 	):
 		if population_size < 2:
 			raise ValueError("population_size must be at least 2")
@@ -66,6 +71,7 @@ class GeneticAlgorithm:
 		self.elite_count = elite_count
 		self.tournament_size = tournament_size
 		self.evaluation_noise_stdev = evaluation_noise_stdev
+		self.network_only = network_only
 		self.rng = np.random.default_rng(seed)
 		self.fitness_function = evaluate_fitness if fitness_function is None else fitness_function
 		self.genome_size = 6 * hidden_size + 2
@@ -162,6 +168,7 @@ class GeneticAlgorithm:
 		return World(vehicle=Vehicle(
 			controller=controller,
 			noise_stdev=self.evaluation_noise_stdev,
+			navigation_heuristics=not self.network_only,
 		))
 
 	def evaluate_population(self, world_factory=None, steps=1000, progress_callback=None):

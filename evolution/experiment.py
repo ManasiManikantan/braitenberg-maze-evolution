@@ -49,9 +49,14 @@ RESULT_FIELDS = (
 
 
 class MultiCourseWorld:
-    """Run one controller on each training course and expose mean fitness."""
+    """Run one controller on each training course and expose mean fitness.
 
-    def __init__(self, controller, noise_stdev=0.0, noise_seed_base=TRAINING_NOISE_SEED_BASE):
+    ``network_only=True`` (the default) disables the hand-coded navigation
+    heuristics so the controller alone drives the robot.
+    """
+
+    def __init__(self, controller, noise_stdev=0.0, noise_seed_base=TRAINING_NOISE_SEED_BASE,
+                 network_only=True):
         self.worlds = [
             (
                 f"course_{difficulty}",
@@ -61,6 +66,7 @@ class MultiCourseWorld:
                         controller=controller,
                         noise_stdev=noise_stdev,
                         noise_seed=noise_seed_base + difficulty,
+                        navigation_heuristics=not network_only,
                     ),
                 ),
             )
@@ -249,6 +255,7 @@ def run_experiment(
     output_path="experiment_results.csv",
     genomes_path="experiment_genomes.npz",
     history_path="experiment_training_history.csv",
+    network_only=True,
 ):
     courses = make_evaluation_courses()
     records = []
@@ -263,6 +270,7 @@ def run_experiment(
             mutation_scale=0.2,
             seed=training_seed,
             fitness_function=evaluate_course_set,
+            network_only=network_only,
         )
         genomes[f"random_seed{training_seed}"] = algorithm.population[0].genome.copy()
         random_controller = algorithm.decode_genome(
@@ -286,12 +294,13 @@ def run_experiment(
         write_results(output_path, records)
         print_summary(baseline, course_group="training")
 
-        print(f"Seed {training_seed}: evolving on courses 1-4...")
+        mode_label = "network only" if network_only else "with heuristics"
+        print(f"Seed {training_seed}: evolving on courses 1-4 ({mode_label})...")
         best = algorithm.run(
             generations=generations,
             steps=steps,
             world_factory=lambda controller: MultiCourseWorld(
-                controller, noise_stdev=noise_stdev
+                controller, noise_stdev=noise_stdev, network_only=network_only
             ),
         )
         evolved_controller = algorithm.decode_genome(best.genome)
@@ -336,6 +345,9 @@ def main():
     parser.add_argument("--output", default="experiment_results.csv")
     parser.add_argument("--genomes-output", default="experiment_genomes.npz")
     parser.add_argument("--history-output", default="experiment_training_history.csv")
+    parser.add_argument("--with-heuristics", action="store_true",
+                        help="evolve with the hand-coded navigation heuristics enabled "
+                             "(default: the network is the only controller)")
     arguments = parser.parse_args()
     if arguments.seeds < 1:
         parser.error("--seeds must be at least 1")
@@ -356,6 +368,7 @@ def main():
         output_path=arguments.output,
         genomes_path=arguments.genomes_output,
         history_path=arguments.history_output,
+        network_only=not arguments.with_heuristics,
     )
 
 

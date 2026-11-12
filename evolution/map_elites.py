@@ -32,6 +32,17 @@ DEFAULT_OUTPUT_DIR = Path("results")
 DEFAULT_PLOT_DIR = Path("test_output")
 
 
+def load_seed_genomes(path, genome_size):
+    """Load saved elite genomes for re-evaluation in a new search."""
+    with np.load(path, allow_pickle=False) as data:
+        genomes = np.asarray(data["genomes"], dtype=float)
+    if genomes.ndim != 2 or genomes.shape[1] != genome_size or len(genomes) == 0:
+        raise ValueError(f"seed archive must contain at least one genome of length {genome_size}")
+    if not np.isfinite(genomes).all():
+        raise ValueError("seed genomes must contain only finite numbers")
+    return genomes
+
+
 class MapElites:
     """Grid archive indexed by progress or personality behavior descriptors."""
 
@@ -80,6 +91,7 @@ class MapElites:
         self.steps = 3000
         self.history = []
         self.evaluation_log = []
+        self.seed_count = 0
 
     def cell_for(self, descriptor):
         """Map a behavior descriptor to integer grid coordinates."""
@@ -179,11 +191,35 @@ class MapElites:
             self.archive[cell] = elite
         return inserted
 
-    def run(self, evaluations=1000, initial=50, steps=None, log_every=100):
+    def run(self, evaluations=1000, initial=50, steps=None, log_every=100, seed_genomes=None):
+        if seed_genomes is not None:
+            seed_genomes = np.asarray(seed_genomes, dtype=float)
+            if (
+                seed_genomes.ndim != 2
+                or seed_genomes.shape[1] != self.ga.genome_size
+                or len(seed_genomes) == 0
+                or not np.isfinite(seed_genomes).all()
+            ):
+                raise ValueError("seed genomes must be a nonempty finite array of valid genomes")
+            if self.evaluations != 0:
+                raise ValueError("seed genomes can only be used to start a new search")
+            if len(seed_genomes) > evaluations:
+                raise ValueError("evaluation budget must accommodate every seed genome")
+        if evaluations < 0 or initial < 0 or log_every < 1:
+            raise ValueError("evaluations and initial must be non-negative and log_every positive")
+        if evaluations > self.evaluations and initial == 0 and seed_genomes is None and not self.archive:
+            raise ValueError("a new search needs initial genomes or seed genomes")
         if steps is None:
             steps = DEFAULT_PERSONALITY_STEPS if self.behavior_mode == "personality" else 3000
+        if steps < 0:
+            raise ValueError("steps must be non-negative")
         self.steps = steps
-        for _ in range(min(initial, evaluations)):
+        if seed_genomes is not None:
+            self.seed_count = len(seed_genomes)
+            for genome in seed_genomes:
+                self.add(genome)
+                self._log(log_every)
+        for _ in range(min(initial, max(0, evaluations - self.evaluations))):
             self.add(self.ga._random_genome())
             self._log(log_every)
         while self.evaluations < evaluations:
@@ -289,6 +325,7 @@ class MapElites:
             navigation_heuristics=self.navigation_heuristics,
             steps=self.steps,
             bins=self.bins,
+            seed_count=self.seed_count,
             coverage=np.array([self.archive[c]["coverage"] for c in cells]),
             unique_cells_visited=np.array([self.archive[c]["unique_cells_visited"] for c in cells]),
             path_revisits=np.array([self.archive[c]["path_revisits"] for c in cells]),
@@ -427,6 +464,8 @@ def main():
     parser.add_argument("--neural-only", action="store_true",
                         help="disable the hard-coded navigation heuristics")
     parser.add_argument("--seed", type=int, default=0)
+    parser.add_argument("--seed-archive",
+                        help="re-evaluate saved elite genomes as seeds for a new search")
     parser.add_argument("--output", default=str(DEFAULT_PLOT_DIR / "map_elites_archive.png"))
     parser.add_argument("--save", default=str(DEFAULT_OUTPUT_DIR / "map_elites_archive.npz"))
     parser.add_argument("--evaluations-csv", default=str(DEFAULT_OUTPUT_DIR / "map_elites_evaluations.csv"),
@@ -458,11 +497,16 @@ def main():
         seed=arguments.seed,
         behavior_mode="personality" if arguments.personality else "progress",
     )
+    seed_genomes = None
+    if arguments.seed_archive:
+        seed_genomes = load_seed_genomes(arguments.seed_archive, archive.ga.genome_size)
+        print(f"Seeding with {len(seed_genomes)} saved genomes from {arguments.seed_archive}.")
     print(f"Running MAP-Elites on course {arguments.course}...")
     archive.run(
         evaluations=arguments.evaluations,
         initial=arguments.initial,
         steps=arguments.steps,
+        seed_genomes=seed_genomes,
     )
     archive.save(arguments.save)
     archive.save_csv(arguments.evaluations_csv, evaluated=True)

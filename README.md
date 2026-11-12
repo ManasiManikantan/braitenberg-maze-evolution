@@ -142,6 +142,17 @@ Later runs overwrite those default files. Override individual paths with
 `--output`, `--save`, `--evaluations-csv`, and `--elites-csv`; parent folders
 for custom paths must already exist. Visual test figures also use `test_output`.
 
+To start a new search with saved elites, pass
+`--seed-archive results/personality-5000/archive.npz`. Every saved genome is
+re-evaluated with the new run's course, step limit, and other settings before
+being inserted. Seed evaluations count toward `--evaluations`; `--initial`
+additional random controllers are then evaluated if the budget permits, and
+the remaining evaluations generate mutated offspring. The budget must be at
+least the number of saved genomes. The new archive records `seed_count`, and
+the seed evaluations appear first in the evaluation CSV. This is a new seeded
+search, not an exact continuation of the old random state or evaluation history.
+Use different output paths to preserve the seed archive and earlier results.
+
 Useful options: `--course 1-4`, `--bins 10 10`, `--coverage-range 0.03 0.2`,
 `--progress-max 0.85` (a robot stops once it overlaps the goal, so progress
 never reaches 1.0), `--neural-only` (disable the hard-coded heuristics so the

@@ -9,7 +9,7 @@ from unittest.mock import patch
 
 import numpy as np
 
-from evolution.map_elites import MapElites, personality_representatives, plot_archive
+from evolution.map_elites import MapElites, load_seed_genomes, personality_representatives, plot_archive
 from evolution.fitness import evaluate_fitness
 from sim.maze import Maze
 from sim.robot import Vehicle
@@ -17,6 +17,42 @@ from sim.world import World
 
 
 class MapElitesTests(unittest.TestCase):
+    def test_seed_archive_re_evaluates_genomes_and_counts_budget(self):
+        source = MapElites(seed=1, behavior_mode="personality", noise_stdev=0)
+        source.run(evaluations=4, initial=4, steps=20, log_every=100)
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "seeds.npz"
+            source.save(path)
+            genomes = load_seed_genomes(path, source.ga.genome_size)
+            target = MapElites(seed=2, behavior_mode="personality", noise_stdev=0)
+            target.run(evaluations=len(genomes) + 2, initial=0, steps=40,
+                       log_every=100, seed_genomes=genomes)
+            self.assertEqual(target.seed_count, len(genomes))
+            self.assertEqual(target.evaluations, len(genomes) + 2)
+            for genome, (_, _, _, elite) in zip(genomes, target.evaluation_log):
+                np.testing.assert_array_equal(genome, elite["genome"])
+                np.testing.assert_array_equal(elite["path"], target.evaluate(genome)["path"])
+            target.save(path)
+            with np.load(path) as data:
+                self.assertEqual(int(data["seed_count"]), len(genomes))
+                self.assertEqual(int(data["steps"]), 40)
+
+    def test_invalid_seed_archives_and_budget_are_rejected(self):
+        archive = MapElites()
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "invalid.npz"
+            for genomes in (
+                np.empty((0, archive.ga.genome_size)),
+                np.zeros((2, archive.ga.genome_size + 1)),
+                np.full((1, archive.ga.genome_size), np.nan),
+            ):
+                np.savez(path, genomes=genomes)
+                with self.assertRaises(ValueError):
+                    load_seed_genomes(path, archive.ga.genome_size)
+        with self.assertRaises(ValueError):
+            archive.run(evaluations=1, seed_genomes=np.zeros((2, archive.ga.genome_size)))
+        self.assertEqual(archive.evaluations, 0)
+
     def test_cli_writes_default_results_and_respects_custom_output(self):
         project = Path(__file__).resolve().parents[1]
         with tempfile.TemporaryDirectory() as folder:

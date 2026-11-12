@@ -2,7 +2,7 @@
 
 import numpy as np
 
-from controller.network import NeuralNetwork
+from controller.network import DEFAULT_OUTPUT_BIAS, NeuralNetwork
 from evolution.fitness import evaluate_fitness
 from sim.robot import Vehicle
 from sim.world import World
@@ -43,6 +43,7 @@ class GeneticAlgorithm:
 		fitness_function=None,
 		evaluation_noise_stdev=0.0,
 		network_only=True,
+		initial_output_bias=DEFAULT_OUTPUT_BIAS,
 	):
 		if population_size < 2:
 			raise ValueError("population_size must be at least 2")
@@ -72,6 +73,7 @@ class GeneticAlgorithm:
 		self.tournament_size = tournament_size
 		self.evaluation_noise_stdev = evaluation_noise_stdev
 		self.network_only = network_only
+		self.initial_output_bias = float(initial_output_bias)
 		self.rng = np.random.default_rng(seed)
 		self.fitness_function = evaluate_fitness if fitness_function is None else fitness_function
 		self.genome_size = 6 * hidden_size + 2
@@ -84,7 +86,7 @@ class GeneticAlgorithm:
 		input_hidden = self.rng.normal(0.0, 1.0, (3, self.hidden_size))
 		bias_hidden = np.zeros(self.hidden_size)
 		hidden_output = self.rng.normal(0.0, 1.0, (self.hidden_size, 2))
-		bias_output = np.zeros(2)
+		bias_output = np.full(2, self.initial_output_bias)
 		return np.concatenate((
 			input_hidden.ravel(),
 			bias_hidden,

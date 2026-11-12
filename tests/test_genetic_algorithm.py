@@ -1,5 +1,7 @@
 import unittest
 
+import numpy as np
+
 from evolution.genetic_algorithm import GeneticAlgorithm
 
 
@@ -50,6 +52,19 @@ class GeneticAlgorithmTests(unittest.TestCase):
         ]
         self.assertEqual(best_history, [1.0, 1.0])
         self.assertEqual(generation_history, [1.0, -22.0])
+
+    def test_random_genomes_drive_forward_with_no_obstacles_in_range(self):
+        algorithm = GeneticAlgorithm(population_size=6, seed=3)
+        for individual in algorithm.population:
+            network = algorithm.decode_genome(individual.genome)
+            np.testing.assert_allclose(network.bias_output, [0.5, 0.5])
+            left, right = network.forward((0.0, 0.0, 0.0))
+            self.assertGreater(left, 0.0)
+            self.assertGreater(right, 0.0)
+
+        zero_bias = GeneticAlgorithm(population_size=4, seed=3, initial_output_bias=0.0)
+        network = zero_bias.decode_genome(zero_bias.population[0].genome)
+        np.testing.assert_allclose(network.forward((0.0, 0.0, 0.0)), [0.0, 0.0])
 
     def test_default_world_is_network_only(self):
         algorithm = GeneticAlgorithm(population_size=4, seed=1)

@@ -6,7 +6,7 @@ from pathlib import Path
 
 import numpy as np
 
-from evolution.fitness import evaluate_fitness
+from evolution.fitness import evaluate_fitness, evaluate_outcome_fitness
 from evolution.genetic_algorithm import GeneticAlgorithm
 from sim.maze import Maze
 from sim.robot import Vehicle
@@ -103,6 +103,27 @@ def evaluate_course_set(multi_course_world):
     return {
         "score": sum(result["score"] for _, result in results) / len(results),
         "score_components": score_components,
+        "courses": [
+            {"course": course_name, **result}
+            for course_name, result in results
+        ],
+    }
+
+
+def evaluate_course_set_outcome(multi_course_world):
+    """Mean outcome-only fitness across the training courses (network-only default)."""
+    results = [
+        (course_name, evaluate_outcome_fitness(world))
+        for course_name, world in multi_course_world.worlds
+    ]
+    component_names = results[0][1]["score_components"]
+    return {
+        "score": sum(result["score"] for _, result in results) / len(results),
+        "score_components": {
+            component: sum(result["score_components"][component] for _, result in results)
+            / len(results)
+            for component in component_names
+        },
         "courses": [
             {"course": course_name, **result}
             for course_name, result in results
@@ -269,7 +290,9 @@ def run_experiment(
             mutation_rate=0.15,
             mutation_scale=0.2,
             seed=training_seed,
-            fitness_function=evaluate_course_set,
+            fitness_function=(
+                evaluate_course_set_outcome if network_only else evaluate_course_set
+            ),
             network_only=network_only,
         )
         genomes[f"random_seed{training_seed}"] = algorithm.population[0].genome.copy()

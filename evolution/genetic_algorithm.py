@@ -3,7 +3,7 @@
 import numpy as np
 
 from controller.network import DEFAULT_OUTPUT_BIAS, NeuralNetwork
-from evolution.fitness import evaluate_fitness
+from evolution.fitness import evaluate_outcome_fitness, evaluate_shaped_fitness
 from sim.robot import Vehicle
 from sim.world import World
 
@@ -28,6 +28,9 @@ class GeneticAlgorithm:
 	With ``network_only=True`` (the default) the default world disables the
 	hand-coded navigation heuristics, so the evolved network is the only
 	controller. Set it to ``False`` to evolve inside the rule-based layer.
+	Unless ``fitness_function`` is given, network-only runs are scored with
+	``evaluate_outcome_fitness`` and rule-based runs with
+	``evaluate_shaped_fitness``.
 	"""
 
 	def __init__(
@@ -75,7 +78,11 @@ class GeneticAlgorithm:
 		self.network_only = network_only
 		self.initial_output_bias = float(initial_output_bias)
 		self.rng = np.random.default_rng(seed)
-		self.fitness_function = evaluate_fitness if fitness_function is None else fitness_function
+		if fitness_function is None:
+			fitness_function = (
+				evaluate_outcome_fitness if network_only else evaluate_shaped_fitness
+			)
+		self.fitness_function = fitness_function
 		self.genome_size = 6 * hidden_size + 2
 		self.population = self.initialize_population()
 		self.generation = 0

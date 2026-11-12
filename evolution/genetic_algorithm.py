@@ -4,7 +4,7 @@ import numpy as np
 
 from controller.network import DEFAULT_OUTPUT_BIAS, NeuralNetwork
 from evolution.fitness import evaluate_outcome_fitness, evaluate_shaped_fitness
-from sim.robot import Vehicle
+from sim.robot import DEFAULT_ROBOT_NOISE, Vehicle
 from sim.world import World
 
 
@@ -31,6 +31,11 @@ class GeneticAlgorithm:
 	Unless ``fitness_function`` is given, network-only runs are scored with
 	``evaluate_outcome_fitness`` and rule-based runs with
 	``evaluate_shaped_fitness``.
+
+	The default world applies ``robot_noise`` (``DEFAULT_ROBOT_NOISE`` unless
+	given; pass ``{}`` to disable): sensor, per-wheel motor, fixed wheel
+	mismatch, and start pose noise, with a fresh reproducible noise seed for
+	every evaluation.
 	"""
 
 	def __init__(
@@ -47,6 +52,7 @@ class GeneticAlgorithm:
 		evaluation_noise_stdev=0.0,
 		network_only=True,
 		initial_output_bias=DEFAULT_OUTPUT_BIAS,
+		robot_noise=None,
 	):
 		if population_size < 2:
 			raise ValueError("population_size must be at least 2")
@@ -77,7 +83,11 @@ class GeneticAlgorithm:
 		self.evaluation_noise_stdev = evaluation_noise_stdev
 		self.network_only = network_only
 		self.initial_output_bias = float(initial_output_bias)
+		self.robot_noise = dict(DEFAULT_ROBOT_NOISE if robot_noise is None else robot_noise)
 		self.rng = np.random.default_rng(seed)
+		# Separate stream so per-evaluation noise seeds do not perturb the
+		# GA's own selection/mutation random numbers.
+		self._noise_seed_rng = np.random.default_rng(None if seed is None else [seed, 1])
 		if fitness_function is None:
 			fitness_function = (
 				evaluate_outcome_fitness if network_only else evaluate_shaped_fitness
@@ -178,6 +188,8 @@ class GeneticAlgorithm:
 			controller=controller,
 			noise_stdev=self.evaluation_noise_stdev,
 			navigation_heuristics=not self.network_only,
+			noise_seed=int(self._noise_seed_rng.integers(2**32)),
+			**self.robot_noise,
 		))
 
 	def evaluate_population(self, world_factory=None, steps=1000, progress_callback=None):

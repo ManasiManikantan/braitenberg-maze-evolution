@@ -9,6 +9,17 @@ Defines the core building blocks for a maze-navigation robot:
 
 import numpy as np
 
+# Modest robot-realism noise used by default when evolving controllers.
+# Vehicle itself defaults every source to off so rule-based tests and other
+# callers keep their exact behavior.
+DEFAULT_ROBOT_NOISE = {
+    "sensor_noise_stdev": 0.2,      # 2% of the default 10-unit sensor range
+    "motor_noise_stdev": 0.05,      # per wheel, per step, in motor-command units
+    "motor_mismatch": 0.05,         # left gain 1.025, right gain 0.975
+    "start_position_stdev": 0.2,    # maze units, clipped to +/-0.4
+    "start_heading_stdev": 0.1,     # radians (~6 degrees), clipped to +/-0.2
+}
+
 
 def euclidean_distance(point1, point2):
     """Return the Euclidean distance between two Point objects."""
@@ -47,6 +58,20 @@ class Vehicle(Point):
         wiring:       Sensor-to-motor mapping: "crossed" (default) or "direct".
         controller:   Optional controller with a two-input, two-output API.
         distance:     Legacy alias for sensor_range.
+        sensor_noise_stdev: Gaussian noise (maze units) added to each ray
+                      distance reading every step. Zero disables it.
+        motor_noise_stdev: Gaussian noise added independently to each wheel's
+                      motor command every step. Zero disables it.
+        motor_mismatch: Fixed fractional gain difference between the wheels:
+                      left gain is 1 + m/2 and right gain is 1 - m/2.
+        start_position_stdev: Gaussian jitter (maze units) of the start x and y,
+                      clipped to two standard deviations.
+        start_heading_stdev: Gaussian jitter (radians) of the start heading,
+                      clipped to two standard deviations.
+
+    All noise sources default to off; ``DEFAULT_ROBOT_NOISE`` holds the
+    modest levels used by default for evolution. Disabled sources draw no
+    random numbers, so seeded runs without them are unchanged.
     """
 
     def __init__(self, angle_offset=np.pi/6, turn_gain=0.1, noise_stdev=0.1,
@@ -55,10 +80,12 @@ class Vehicle(Point):
                  reverse_speed=0.75,
                  avoidance_gain=1.5, cruise_speed=0.5, turn_speed=0.75,
                  goal_seek_distance=4.0, wall_avoidance_distance=0.25,
-                 navigation_heuristics=True, noise_seed=None):
+                 navigation_heuristics=True, noise_seed=None,
+                 sensor_noise_stdev=0.0, motor_noise_stdev=0.0, motor_mismatch=0.0,
+                 start_position_stdev=0.0, start_heading_stdev=0.0):
         super().__init__()
-        # Every Vehicle starts at the origin facing along +x. The only thing
-        # that varies between repetitions is the random noise.
+        # Every Vehicle starts at the origin facing along +x, optionally
+        # jittered by start_position_stdev / start_heading_stdev below.
         self.orientation = 0.0          # heading angle (radians); starts pointing along +x
         self.velocity = 0.0             # forward speed (arbitrary units)
         self.radius = 1.0               # body radius; also the sensor arm length
@@ -93,6 +120,14 @@ class Vehicle(Point):
             raise ValueError("turn_speed must be in (0, 1]")
         if goal_seek_distance <= 0:
             raise ValueError("goal_seek_distance must be positive")
+        if min(sensor_noise_stdev, motor_noise_stdev,
+               start_position_stdev, start_heading_stdev) < 0:
+            raise ValueError("noise standard deviations must be non-negative")
+        if not -1 < motor_mismatch < 1:
+            raise ValueError("motor_mismatch must be in (-1, 1)")
+        self.sensor_noise_stdev = sensor_noise_stdev
+        self.motor_noise_stdev = motor_noise_stdev
+        self.motor_mismatch = motor_mismatch
         self.sensor_range = sensor_range
         self.avoidance_distance = avoidance_distance
         self.wall_avoidance_distance = wall_avoidance_distance
@@ -105,6 +140,18 @@ class Vehicle(Point):
         self.goal_seek_distance = goal_seek_distance
         self.navigation_heuristics = navigation_heuristics
         self._noise_rng = np.random.default_rng(noise_seed)
+        if start_position_stdev > 0:
+            self.x_pos, self.y_pos = map(float, np.clip(
+                self._noise_rng.normal(0.0, start_position_stdev, 2),
+                -2 * start_position_stdev,
+                2 * start_position_stdev,
+            ))
+        if start_heading_stdev > 0:
+            self.orientation = float(np.clip(
+                self._noise_rng.normal(0.0, start_heading_stdev),
+                -2 * start_heading_stdev,
+                2 * start_heading_stdev,
+            ))
         self.left_distance = sensor_range
         self.front_distance = sensor_range
         self.right_distance = sensor_range
@@ -183,6 +230,14 @@ class Vehicle(Point):
             ray_direction,
             self.sensor_range,
         )
+        if self.sensor_noise_stdev > 0:
+            noisy = np.clip(
+                np.array([self.left_distance, self.front_distance, self.right_distance])
+                + self._noise_rng.normal(0.0, self.sensor_noise_stdev, 3),
+                0.0,
+                self.sensor_range,
+            )
+            self.left_distance, self.front_distance, self.right_distance = map(float, noisy)
         self.left_sensor = 1.0 - self.left_distance / self.sensor_range
         self.front_sensor = 1.0 - self.front_distance / self.sensor_range
         self.right_sensor = 1.0 - self.right_distance / self.sensor_range
@@ -419,8 +474,14 @@ class Vehicle(Point):
         was_scanning = self._turning_to_clear
         old_orientation = self.orientation
         noise = self._noise_rng.normal(0, self.noise_stdev)
-        self.orientation += self.turn_gain * (self.left_motor - self.right_motor) + noise
-        self.velocity = self.vel_gain * ((self.right_motor + self.left_motor) / 2)
+        left_wheel = self.left_motor * (1 + self.motor_mismatch / 2)
+        right_wheel = self.right_motor * (1 - self.motor_mismatch / 2)
+        if self.motor_noise_stdev > 0:
+            left_noise, right_noise = self._noise_rng.normal(0.0, self.motor_noise_stdev, 2)
+            left_wheel += left_noise
+            right_wheel += right_noise
+        self.orientation += self.turn_gain * (left_wheel - right_wheel) + noise
+        self.velocity = self.vel_gain * ((right_wheel + left_wheel) / 2)
         old_position = (self.x_pos, self.y_pos)
         self.update_body_pos()
         collided = maze is not None and maze.collides(

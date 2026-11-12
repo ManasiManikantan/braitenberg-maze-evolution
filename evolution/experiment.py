@@ -9,7 +9,7 @@ import numpy as np
 from evolution.fitness import evaluate_fitness, evaluate_outcome_fitness
 from evolution.genetic_algorithm import GeneticAlgorithm
 from sim.maze import Maze
-from sim.robot import Vehicle
+from sim.robot import DEFAULT_ROBOT_NOISE, Vehicle
 from sim.world import World
 
 TRAINING_COURSES = (1, 2, 3, 4)
@@ -52,11 +52,13 @@ class MultiCourseWorld:
     """Run one controller on each training course and expose mean fitness.
 
     ``network_only=True`` (the default) disables the hand-coded navigation
-    heuristics so the controller alone drives the robot.
+    heuristics so the controller alone drives the robot. ``robot_noise``
+    defaults to ``DEFAULT_ROBOT_NOISE``; pass ``{}`` to disable it.
     """
 
     def __init__(self, controller, noise_stdev=0.0, noise_seed_base=TRAINING_NOISE_SEED_BASE,
-                 network_only=True):
+                 network_only=True, robot_noise=None):
+        robot_noise = DEFAULT_ROBOT_NOISE if robot_noise is None else robot_noise
         self.worlds = [
             (
                 f"course_{difficulty}",
@@ -67,6 +69,7 @@ class MultiCourseWorld:
                         noise_stdev=noise_stdev,
                         noise_seed=noise_seed_base + difficulty,
                         navigation_heuristics=not network_only,
+                        **robot_noise,
                     ),
                 ),
             )
@@ -180,8 +183,14 @@ def evaluate_controller(
     courses,
     steps,
     noise_stdev,
+    robot_noise=None,
 ):
-    """Evaluate one controller on every course with reproducible noise."""
+    """Evaluate one controller on every course with reproducible noise.
+
+    ``robot_noise`` (default ``DEFAULT_ROBOT_NOISE``) applies to every
+    controller and mode so comparisons share the same conditions.
+    """
+    robot_noise = DEFAULT_ROBOT_NOISE if robot_noise is None else robot_noise
     use_heuristics = behavior_mode == "full"
     records = []
     for course_index, (course_name, course_group, maze) in enumerate(courses):
@@ -191,6 +200,7 @@ def evaluate_controller(
             noise_stdev=noise_stdev,
             noise_seed=noise_seed,
             navigation_heuristics=use_heuristics,
+            **robot_noise,
         )
         world = World(maze=maze, vehicle=vehicle)
         world.run(steps)
@@ -277,7 +287,9 @@ def run_experiment(
     genomes_path="experiment_genomes.npz",
     history_path="experiment_training_history.csv",
     network_only=True,
+    robot_noise=None,
 ):
+    robot_noise = DEFAULT_ROBOT_NOISE if robot_noise is None else robot_noise
     courses = make_evaluation_courses()
     records = []
     genomes = {}
@@ -312,6 +324,7 @@ def run_experiment(
             courses,
             steps,
             noise_stdev,
+            robot_noise,
         )
         records.extend(baseline)
         write_results(output_path, records)
@@ -319,11 +332,20 @@ def run_experiment(
 
         mode_label = "network only" if network_only else "with heuristics"
         print(f"Seed {training_seed}: evolving on courses 1-4 ({mode_label})...")
+        # Fresh, reproducible noise for every training evaluation, so start
+        # jitter and sensor/motor noise cannot be memorized.
+        training_noise_rng = np.random.default_rng(
+            [TRAINING_NOISE_SEED_BASE, training_seed]
+        )
         best = algorithm.run(
             generations=generations,
             steps=steps,
             world_factory=lambda controller: MultiCourseWorld(
-                controller, noise_stdev=noise_stdev, network_only=network_only
+                controller,
+                noise_stdev=noise_stdev,
+                noise_seed_base=int(training_noise_rng.integers(2**31)),
+                network_only=network_only,
+                robot_noise=robot_noise,
             ),
         )
         evolved_controller = algorithm.decode_genome(best.genome)
@@ -348,6 +370,7 @@ def run_experiment(
                 courses,
                 steps,
                 noise_stdev,
+                robot_noise,
             ))
         write_results(output_path, records)
 
@@ -371,6 +394,8 @@ def main():
     parser.add_argument("--with-heuristics", action="store_true",
                         help="evolve with the hand-coded navigation heuristics enabled "
                              "(default: the network is the only controller)")
+    parser.add_argument("--no-robot-noise", action="store_true",
+                        help="disable sensor, motor, wheel-mismatch, and start-pose noise")
     arguments = parser.parse_args()
     if arguments.seeds < 1:
         parser.error("--seeds must be at least 1")
@@ -392,6 +417,7 @@ def main():
         genomes_path=arguments.genomes_output,
         history_path=arguments.history_output,
         network_only=not arguments.with_heuristics,
+        robot_noise={} if arguments.no_robot_noise else None,
     )
 
 

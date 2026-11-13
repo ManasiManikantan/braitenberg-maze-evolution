@@ -76,12 +76,14 @@ def _path_map_key(maze, radius, cell_size):
 def path_distance_map(maze, radius, cell_size=PATH_CELL_SIZE):
 	"""Return a grid of shortest-path distances (maze units) to the goal.
 
-	The maze is divided into ``cell_size`` squares. A cell is free when a
-	robot body of ``radius`` centred there does not collide with a wall or
-	obstacle. A 4-connected breadth-first search from the goal cell gives the
-	number of moves to the goal, multiplied by ``cell_size``. Cells that are
-	blocked only because the body is in contact with a wall take the distance
-	of the nearest reachable cell; unreachable regions stay ``inf``.
+	The maze is divided into ``cell_size`` squares. A cell is free when a body
+	of ``radius - cell_size`` centred there does not collide with a wall or
+	obstacle; the one-cell allowance covers the robot sitting anywhere inside
+	the cell, so gaps the robot can just squeeze through (for example exactly
+	its own diameter) stay connected. A 4-connected breadth-first search from
+	the goal cell gives the number of moves to the goal, multiplied by
+	``cell_size``. Any cell the search does not reach (solid interiors) takes
+	the distance of the nearest reached cell, so every lookup is finite.
 	Results are cached per maze geometry.
 	"""
 	if cell_size <= 0:
@@ -99,7 +101,7 @@ def path_distance_map(maze, radius, cell_size=PATH_CELL_SIZE):
 				maze.x_min + (column + 0.5) * cell_size,
 				maze.y_min + (row + 0.5) * cell_size,
 			)
-			free[column, row] = not maze.collides(centre, radius)
+			free[column, row] = not maze.collides(centre, max(0.0, radius - cell_size))
 
 	steps = np.full((columns, rows), np.inf)
 	goal_column = min(columns - 1, max(0, int((maze.goal[0] - maze.x_min) / cell_size)))
@@ -118,11 +120,10 @@ def path_distance_map(maze, radius, cell_size=PATH_CELL_SIZE):
 				steps[next_column, next_row] = steps[column, row] + 1
 				queue.append((next_column, next_row))
 
-	# Fill a thin band of blocked cells next to reachable space so that a body
-	# touching a wall still gets a sensible distance.
+	# Give every unreached cell the distance of the nearest reached cell so a
+	# body pressed into a wall (or any unexpected position) scores finitely.
 	distances = steps * cell_size
-	contact_band = int(np.ceil(radius / cell_size)) + 1
-	for _ in range(contact_band):
+	while not np.isfinite(distances).all():
 		padded = np.pad(distances, 1, constant_values=np.inf)
 		neighbours = np.minimum.reduce([
 			padded[2:, 1:-1], padded[:-2, 1:-1], padded[1:-1, 2:], padded[1:-1, :-2],

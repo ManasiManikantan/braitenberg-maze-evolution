@@ -1,6 +1,8 @@
 import math
 import unittest
 
+import numpy as np
+
 from evolution import fitness as fitness_module
 from evolution.fitness import evaluate_fitness, evaluate_outcome_fitness, path_distances
 from sim.maze import Maze
@@ -138,6 +140,23 @@ class OutcomeFitnessTests(unittest.TestCase):
         start_distance = path_distances(maze, [(-5.0, 0.0)], radius=1.0)[0]
         # must go around the top of the wall (y > 5 + radius), not straight through
         self.assertGreater(start_distance, 20.0)
+
+    def test_gap_exactly_robot_diameter_stays_connected_and_finite(self):
+        # Wall ends at y=8; the boundary is at y=10, so the gap is exactly 2 units,
+        # the robot's diameter. Course 1 has the same kind of pocket.
+        maze = Maze(walls=[((0.0, -10.0), (0.0, 8.0))], obstacles=[], goal=(5.0, 0.0),
+                    goal_radius=1.0)
+        start, squeezing, pressed = path_distances(
+            maze, [(-5.0, 0.0), (0.0, 9.0), (-1.05, 0.0)], radius=1.0)
+        self.assertTrue(np.isfinite([start, squeezing, pressed]).all())
+        self.assertGreater(start, 20.0)
+        self.assertLess(squeezing, start)
+
+    def test_every_course_position_has_finite_path_distance(self):
+        for difficulty in (1, 2, 3, 4):
+            maze = Maze(difficulty=difficulty)
+            grid = [(x, y) for x in np.linspace(-9.9, 9.9, 60) for y in np.linspace(-9.9, 9.9, 60)]
+            self.assertTrue(np.isfinite(path_distances(maze, grid, radius=1.0)).all())
 
     def test_progress_is_fraction_of_start_path_distance(self):
         world = self.make_world([(0.0, 0.0), (4.0, -3.5)])

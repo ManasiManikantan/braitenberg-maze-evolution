@@ -40,6 +40,13 @@ class WallsHurtTests(unittest.TestCase):
         world.run(50)
         self.assertEqual(world.steps, steps)   # dead robots do not move
 
+    def test_contact_steps_drain_health(self):
+        world = World(maze=box(), vehicle=vehicle(Fixed(1.0, 1.0)), health=10, contact_step_cost=0.5)
+        world.run(400)                         # one hit (1 + 0.5) then 0.5 per pinned step
+        self.assertTrue(world.dead)
+        self.assertEqual(world.contact_entries, 1)
+        self.assertEqual(world.collisions, 18)  # 1.5 + 17 * 0.5 = 10
+
     def test_health_off_by_default(self):
         world = World(maze=box(), vehicle=vehicle(Fixed(1.0, 1.0)))
         self.assertIsNone(world.health)

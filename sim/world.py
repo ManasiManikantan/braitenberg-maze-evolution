@@ -12,11 +12,12 @@ class World:
 	def __init__(self, maze=None, vehicle=None, goal=None, goal_radius=None,
 			 goal_tolerance=None, revisit_cell_size=1.0, revisit_trigger=2,
 			 stagnation_limit=80, progress_tolerance=0.25, health=None, damage_per_hit=1.0,
-			 energy=None):
+			 energy=None, contact_step_cost=0.0):
 		"""``health`` (None = off) turns on "walls hurt": every new collision
 		(entering contact, not every step spent pinned against a wall) costs
-		``damage_per_hit``; at 0 the robot is ``dead`` and the run ends without
-		reaching the goal. ``contact_entries`` counts new collisions either way.
+		``damage_per_hit``, and every step spent in contact (including the
+		first) costs ``contact_step_cost`` (default 0); at 0 the robot is
+		``dead`` and the run ends without reaching the goal. ``contact_entries`` counts new collisions either way.
 
 		``energy`` (None = off) turns on the battery: every step costs
 		|left motor| + |right motor| (the clipped commands); when it reaches 0
@@ -45,8 +46,9 @@ class World:
 			raise ValueError("progress_tolerance must be non-negative")
 		if health is not None and health <= 0:
 			raise ValueError("health must be positive or None")
-		if damage_per_hit < 0:
-			raise ValueError("damage_per_hit must be non-negative")
+		if damage_per_hit < 0 or contact_step_cost < 0:
+			raise ValueError("damage_per_hit and contact_step_cost must be non-negative")
+		self.contact_step_cost = contact_step_cost
 		self.health = health
 		self.damage_per_hit = damage_per_hit
 		self.dead = False
@@ -116,9 +118,11 @@ class World:
 			self.collisions += 1
 			if not self._in_contact:
 				self.contact_entries += 1
-				if self.health is not None:
+			if self.health is not None:
+				self.health -= self.contact_step_cost
+				if not self._in_contact:
 					self.health -= self.damage_per_hit
-					self.dead = self.health <= 0
+				self.dead = self.health <= 0
 		self._in_contact = bool(collided)
 		cost = abs(self.vehicle.left_motor) + abs(self.vehicle.right_motor)
 		self.energy_used += cost

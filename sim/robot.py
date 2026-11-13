@@ -51,6 +51,8 @@ class Vehicle(Point):
                       (unused; see ``side_sensor_angle``).
         side_sensor_angle: Angle (radians) between the heading and each side
                       ray, from 0 (parallel) to pi/2. Default 60 degrees.
+        start_position: Starting (x, y) of the body centre. Default origin.
+        start_heading: Starting heading in radians. Default 0 (+x).
         turn_gain:    How strongly the sensor difference steers the vehicle.
                       Larger values produce sharper turns.
         noise_stdev:  Standard deviation of Gaussian noise added to the
@@ -92,11 +94,13 @@ class Vehicle(Point):
                  navigation_heuristics=True, noise_seed=None,
                  sensor_noise_stdev=0.0, motor_noise_stdev=0.0, motor_mismatch=0.0,
                  start_position_stdev=0.0, start_heading_stdev=0.0,
-                 side_sensor_angle=DEFAULT_SIDE_SENSOR_ANGLE):
-        super().__init__()
-        # Every Vehicle starts at the origin facing along +x, optionally
-        # jittered by start_position_stdev / start_heading_stdev below.
-        self.orientation = 0.0          # heading angle (radians); starts pointing along +x
+                 side_sensor_angle=DEFAULT_SIDE_SENSOR_ANGLE,
+                 start_position=(0.0, 0.0), start_heading=0.0):
+        super().__init__(float(start_position[0]), float(start_position[1]))
+        # The vehicle starts at start_position facing start_heading (default:
+        # the origin, facing +x), optionally jittered by start_position_stdev /
+        # start_heading_stdev below.
+        self.orientation = float(start_heading)  # heading angle (radians)
         self.velocity = 0.0             # forward speed (arbitrary units)
         self.radius = 1.0               # body radius; also the sensor arm length
 
@@ -154,13 +158,15 @@ class Vehicle(Point):
         self.navigation_heuristics = navigation_heuristics
         self._noise_rng = np.random.default_rng(noise_seed)
         if start_position_stdev > 0:
-            self.x_pos, self.y_pos = map(float, np.clip(
+            offset_x, offset_y = map(float, np.clip(
                 self._noise_rng.normal(0.0, start_position_stdev, 2),
                 -2 * start_position_stdev,
                 2 * start_position_stdev,
             ))
+            self.x_pos += offset_x
+            self.y_pos += offset_y
         if start_heading_stdev > 0:
-            self.orientation = float(np.clip(
+            self.orientation += float(np.clip(
                 self._noise_rng.normal(0.0, start_heading_stdev),
                 -2 * start_heading_stdev,
                 2 * start_heading_stdev,

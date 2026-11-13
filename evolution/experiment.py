@@ -10,6 +10,7 @@ import numpy as np
 from evolution.fitness import evaluate_fitness, evaluate_outcome_fitness, path_distances
 from evolution.genetic_algorithm import GeneticAlgorithm
 from sim.maze import Maze
+from sim.maze_generator import generate_perfect_maze
 from sim.robot import DEFAULT_ROBOT_NOISE, Vehicle
 from sim.world import World
 
@@ -29,6 +30,11 @@ COLLISION_SCORE_FLOOR = -100.0
 # A factor of 0 (or None) disables per-course limits ("no time pressure").
 DEFAULT_TIME_LIMIT_FACTOR = 2.0
 DEFAULT_REFERENCE_SPEED = 0.05
+# Network-only training uses freshly generated random mazes by default; the
+# built-in courses are kept as a held-out test set.
+DEFAULT_TRAINING = "random_mazes"
+DEFAULT_MAZES_PER_EVALUATION = 3
+DEFAULT_MIRROR_PROBABILITY = 0.0
 HISTORY_FIELDS = (
     "training_seed",
     "generation",
@@ -109,6 +115,59 @@ class MultiCourseWorld:
         self.step_limits = [
             course_step_limit(world.maze, time_limit_factor, reference_speed)
             for _, world in self.worlds
+        ]
+
+    def run(self, steps):
+        self.steps = steps
+        for (_, world), limit in zip(self.worlds, self.step_limits):
+            world.run(_episode_steps(steps, limit))
+
+
+class RandomMazeWorld:
+    """Run one controller on freshly generated random mazes.
+
+    Each instance samples ``mazes_per_evaluation`` new perfect mazes from
+    ``maze_rng`` (see ``sim.maze_generator.generate_perfect_maze``), each with
+    a random start cell and heading, and runs every maze for at most its own
+    ``course_step_limit`` measured from that start. Same interface as
+    ``MultiCourseWorld``, so the course-set fitness functions apply.
+    """
+
+    def __init__(self, controller, maze_rng, mazes_per_evaluation=DEFAULT_MAZES_PER_EVALUATION,
+                 mirror_probability=DEFAULT_MIRROR_PROBABILITY, noise_stdev=0.0,
+                 noise_seed_base=TRAINING_NOISE_SEED_BASE, network_only=True, robot_noise=None,
+                 time_limit_factor=DEFAULT_TIME_LIMIT_FACTOR,
+                 reference_speed=DEFAULT_REFERENCE_SPEED, maze_options=None):
+        if mazes_per_evaluation < 1:
+            raise ValueError("mazes_per_evaluation must be at least 1")
+        robot_noise = DEFAULT_ROBOT_NOISE if robot_noise is None else robot_noise
+        maze_options = {} if maze_options is None else maze_options
+        self.mazes = [
+            generate_perfect_maze(maze_rng, mirror_probability=mirror_probability, **maze_options)
+            for _ in range(mazes_per_evaluation)
+        ]
+        self.worlds = [
+            (
+                f"random_maze_{index}",
+                World(
+                    maze=random_maze.maze,
+                    vehicle=Vehicle(
+                        controller=controller,
+                        noise_stdev=noise_stdev,
+                        noise_seed=noise_seed_base + index,
+                        navigation_heuristics=not network_only,
+                        start_position=random_maze.start,
+                        start_heading=random_maze.start_heading,
+                        **robot_noise,
+                    ),
+                ),
+            )
+            for index, random_maze in enumerate(self.mazes)
+        ]
+        self.step_limits = [
+            course_step_limit(random_maze.maze, time_limit_factor, reference_speed,
+                              start=random_maze.start)
+            for random_maze in self.mazes
         ]
 
     def run(self, steps):
@@ -330,7 +389,12 @@ def run_experiment(
     robot_noise=None,
     time_limit_factor=DEFAULT_TIME_LIMIT_FACTOR,
     reference_speed=DEFAULT_REFERENCE_SPEED,
+    training=DEFAULT_TRAINING,
+    mazes_per_evaluation=DEFAULT_MAZES_PER_EVALUATION,
+    mirror_probability=DEFAULT_MIRROR_PROBABILITY,
 ):
+    if training not in ("random_mazes", "courses"):
+        raise ValueError("training must be 'random_mazes' or 'courses'")
     robot_noise = DEFAULT_ROBOT_NOISE if robot_noise is None else robot_noise
     time_limits = {"time_limit_factor": time_limit_factor, "reference_speed": reference_speed}
     courses = make_evaluation_courses()
@@ -375,23 +439,45 @@ def run_experiment(
         print_summary(baseline, course_group="training")
 
         mode_label = "network only" if network_only else "with heuristics"
-        print(f"Seed {training_seed}: evolving on courses 1-4 ({mode_label})...")
-        # Fresh, reproducible noise for every training evaluation, so start
-        # jitter and sensor/motor noise cannot be memorized.
+        training_label = (
+            f"{mazes_per_evaluation} fresh random mazes per evaluation"
+            if training == "random_mazes" else "courses 1-4"
+        )
+        print(f"Seed {training_seed}: evolving on {training_label} ({mode_label})...")
+        # Fresh, reproducible noise (and mazes) for every training evaluation,
+        # so start poses, sensor/motor noise, and layouts cannot be memorized.
         training_noise_rng = np.random.default_rng(
             [TRAINING_NOISE_SEED_BASE, training_seed]
         )
-        best = algorithm.run(
-            generations=generations,
-            steps=steps,
-            world_factory=lambda controller: MultiCourseWorld(
+        maze_rng = np.random.default_rng([TRAINING_NOISE_SEED_BASE, training_seed, 1])
+
+        def world_factory(controller):
+            noise_seed_base = int(training_noise_rng.integers(2**31))
+            if training == "random_mazes":
+                return RandomMazeWorld(
+                    controller,
+                    maze_rng,
+                    mazes_per_evaluation=mazes_per_evaluation,
+                    mirror_probability=mirror_probability,
+                    noise_stdev=noise_stdev,
+                    noise_seed_base=noise_seed_base,
+                    network_only=network_only,
+                    robot_noise=robot_noise,
+                    **time_limits,
+                )
+            return MultiCourseWorld(
                 controller,
                 noise_stdev=noise_stdev,
-                noise_seed_base=int(training_noise_rng.integers(2**31)),
+                noise_seed_base=noise_seed_base,
                 network_only=network_only,
                 robot_noise=robot_noise,
                 **time_limits,
-            ),
+            )
+
+        best = algorithm.run(
+            generations=generations,
+            steps=steps,
+            world_factory=world_factory,
         )
         evolved_controller = algorithm.decode_genome(best.genome)
         genomes[f"evolved_seed{training_seed}"] = best.genome.copy()
@@ -445,6 +531,15 @@ def main():
     parser.add_argument("--time-limit-factor", type=float, default=DEFAULT_TIME_LIMIT_FACTOR,
                         help="per-course step limit as a multiple of the shortest-path "
                              "driving time at --reference-speed; 0 disables (default: 2)")
+    parser.add_argument("--train-on-courses", action="store_true",
+                        help="train on courses 1-4 instead of fresh random mazes "
+                             "(default: courses are a held-out test set only)")
+    parser.add_argument("--mazes-per-evaluation", type=int,
+                        default=DEFAULT_MAZES_PER_EVALUATION,
+                        help="random mazes sampled for each training evaluation (default: 3)")
+    parser.add_argument("--mirror-probability", type=float,
+                        default=DEFAULT_MIRROR_PROBABILITY,
+                        help="probability of mirroring each random maze left-right (default: 0)")
     parser.add_argument("--reference-speed", type=float, default=DEFAULT_REFERENCE_SPEED,
                         help="maze units per step used for per-course limits (default: 0.05)")
     arguments = parser.parse_args()
@@ -462,6 +557,10 @@ def main():
         parser.error("--time-limit-factor must be non-negative")
     if arguments.reference_speed <= 0:
         parser.error("--reference-speed must be positive")
+    if arguments.mazes_per_evaluation < 1:
+        parser.error("--mazes-per-evaluation must be at least 1")
+    if not 0 <= arguments.mirror_probability <= 1:
+        parser.error("--mirror-probability must be between 0 and 1")
     run_experiment(
         seeds=arguments.seeds,
         generations=arguments.generations,
@@ -475,6 +574,9 @@ def main():
         robot_noise={} if arguments.no_robot_noise else None,
         time_limit_factor=arguments.time_limit_factor,
         reference_speed=arguments.reference_speed,
+        training="courses" if arguments.train_on_courses else "random_mazes",
+        mazes_per_evaluation=arguments.mazes_per_evaluation,
+        mirror_probability=arguments.mirror_probability,
     )
 
 

@@ -10,12 +10,15 @@ exploration, collision, and backtracking terms). ``evaluate_fitness`` remains
 as an alias to it for existing callers such as the MAP-Elites archive.
 """
 
-from collections import deque
+from collections import OrderedDict, deque
 
 import numpy as np
 
 PATH_CELL_SIZE = 0.25
-_PATH_MAP_CACHE = {}
+# Least-recently-used cache of distance maps; bounded because training on
+# freshly generated mazes would otherwise grow it without limit.
+PATH_MAP_CACHE_SIZE = 64
+_PATH_MAP_CACHE = OrderedDict()
 
 
 def _distance_to_goal(position, goal):
@@ -73,6 +76,41 @@ def _path_map_key(maze, radius, cell_size):
 	)
 
 
+def _collision_grid(maze, columns, rows, cell_size, radius):
+	"""Vectorized ``maze.collides`` for every grid-cell centre (same rules)."""
+	xs = maze.x_min + (np.arange(columns) + 0.5) * cell_size
+	ys = maze.y_min + (np.arange(rows) + 0.5) * cell_size
+	x_pos, y_pos = np.meshgrid(xs, ys, indexing="ij")
+	blocked = (
+		(x_pos - radius < maze.x_min) | (x_pos + radius > maze.x_max)
+		| (y_pos - radius < maze.y_min) | (y_pos + radius > maze.y_max)
+	)
+	radius_squared = radius**2
+	for (start_x, start_y), (end_x, end_y) in maze.interior_walls:
+		segment_x = end_x - start_x
+		segment_y = end_y - start_y
+		length_squared = segment_x**2 + segment_y**2
+		if length_squared == 0:
+			projection = np.zeros_like(x_pos)
+		else:
+			projection = np.clip(
+				((x_pos - start_x) * segment_x + (y_pos - start_y) * segment_y)
+				/ length_squared,
+				0.0,
+				1.0,
+			)
+		distance_squared = (
+			(x_pos - (start_x + projection * segment_x))**2
+			+ (y_pos - (start_y + projection * segment_y))**2
+		)
+		blocked |= distance_squared <= radius_squared
+	for x_min, y_min, x_max, y_max in maze.obstacles:
+		nearest_x = np.clip(x_pos, x_min, x_max)
+		nearest_y = np.clip(y_pos, y_min, y_max)
+		blocked |= (x_pos - nearest_x)**2 + (y_pos - nearest_y)**2 <= radius_squared
+	return blocked
+
+
 def path_distance_map(maze, radius, cell_size=PATH_CELL_SIZE):
 	"""Return a grid of shortest-path distances (maze units) to the goal.
 
@@ -90,18 +128,12 @@ def path_distance_map(maze, radius, cell_size=PATH_CELL_SIZE):
 		raise ValueError("cell_size must be positive")
 	key = _path_map_key(maze, radius, cell_size)
 	if key in _PATH_MAP_CACHE:
+		_PATH_MAP_CACHE.move_to_end(key)
 		return _PATH_MAP_CACHE[key]
 
 	columns = max(1, int(round(maze.width / cell_size)))
 	rows = max(1, int(round(maze.height / cell_size)))
-	free = np.zeros((columns, rows), dtype=bool)
-	for column in range(columns):
-		for row in range(rows):
-			centre = (
-				maze.x_min + (column + 0.5) * cell_size,
-				maze.y_min + (row + 0.5) * cell_size,
-			)
-			free[column, row] = not maze.collides(centre, max(0.0, radius - cell_size))
+	free = ~_collision_grid(maze, columns, rows, cell_size, max(0.0, radius - cell_size))
 
 	steps = np.full((columns, rows), np.inf)
 	goal_column = min(columns - 1, max(0, int((maze.goal[0] - maze.x_min) / cell_size)))
@@ -131,6 +163,8 @@ def path_distance_map(maze, radius, cell_size=PATH_CELL_SIZE):
 		distances = np.where(np.isfinite(distances), distances, neighbours)
 
 	_PATH_MAP_CACHE[key] = distances
+	if len(_PATH_MAP_CACHE) > PATH_MAP_CACHE_SIZE:
+		_PATH_MAP_CACHE.popitem(last=False)
 	return distances
 
 

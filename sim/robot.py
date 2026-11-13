@@ -15,7 +15,8 @@ import numpy as np
 DEFAULT_ROBOT_NOISE = {
     "sensor_noise_stdev": 0.2,      # 2% of the default 10-unit sensor range
     "motor_noise_stdev": 0.05,      # per wheel, per step, in motor-command units
-    "motor_mismatch": 0.05,         # left gain 1.025, right gain 0.975
+    "motor_mismatch": 0.05,         # 5% gain difference between the wheels...
+    "randomize_mismatch_side": True,  # ...with a random stronger wheel per run
     "start_position_stdev": 0.2,    # maze units, clipped to +/-0.4
     "start_heading_stdev": 0.1,     # radians (~6 degrees), clipped to +/-0.2
     "light_noise_stdev": 0.02,      # light intensity units (0-1 scale), like 2% sensor noise
@@ -90,6 +91,9 @@ class Vehicle(Point):
                       motor command every step. Zero disables it.
         motor_mismatch: Fixed fractional gain difference between the wheels:
                       left gain is 1 + m/2 and right gain is 1 - m/2.
+        randomize_mismatch_side: If True, the sign of ``motor_mismatch`` is
+                      drawn at random (from the noise seed) when the vehicle is
+                      created, so either wheel may be the stronger one.
         start_position_stdev: Gaussian jitter (maze units) of the start x and y,
                       clipped to two standard deviations.
         start_heading_stdev: Gaussian jitter (radians) of the start heading,
@@ -112,7 +116,8 @@ class Vehicle(Point):
                  side_sensor_angle=DEFAULT_SIDE_SENSOR_ANGLE,
                  start_position=(0.0, 0.0), start_heading=0.0,
                  light_occlusion=None, light_sensor_angle=DEFAULT_LIGHT_SENSOR_ANGLE,
-                 light_falloff_distance=DEFAULT_LIGHT_FALLOFF_DISTANCE, light_noise_stdev=0.0):
+                 light_falloff_distance=DEFAULT_LIGHT_FALLOFF_DISTANCE, light_noise_stdev=0.0,
+                 randomize_mismatch_side=False):
         super().__init__(float(start_position[0]), float(start_position[1]))
         # The vehicle starts at start_position facing start_heading (default:
         # the origin, facing +x), optionally jittered by start_position_stdev /
@@ -186,6 +191,9 @@ class Vehicle(Point):
         self.goal_seek_distance = goal_seek_distance
         self.navigation_heuristics = navigation_heuristics
         self._noise_rng = np.random.default_rng(noise_seed)
+        if randomize_mismatch_side and self.motor_mismatch != 0:
+            if self._noise_rng.random() < 0.5:
+                self.motor_mismatch = -self.motor_mismatch
         if start_position_stdev > 0:
             offset_x, offset_y = map(float, np.clip(
                 self._noise_rng.normal(0.0, start_position_stdev, 2),

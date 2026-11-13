@@ -104,5 +104,22 @@ class RobotNoiseTests(unittest.TestCase):
         self.assertEqual(course_world.vehicle.motor_mismatch, DEFAULT_ROBOT_NOISE["motor_mismatch"])
 
 
+class MismatchSideTests(unittest.TestCase):
+    def test_random_side_flips_sign_with_same_size(self):
+        signs = set()
+        for seed in range(40):
+            vehicle = Vehicle(noise_seed=seed, motor_mismatch=0.05, randomize_mismatch_side=True)
+            self.assertAlmostEqual(abs(vehicle.motor_mismatch), 0.05)
+            signs.add(np.sign(vehicle.motor_mismatch))
+        self.assertEqual(signs, {-1.0, 1.0})
+        again = Vehicle(noise_seed=7, motor_mismatch=0.05, randomize_mismatch_side=True)
+        same = Vehicle(noise_seed=7, motor_mismatch=0.05, randomize_mismatch_side=True)
+        self.assertEqual(again.motor_mismatch, same.motor_mismatch)
+
+    def test_fixed_side_by_default_and_on_in_robot_noise(self):
+        self.assertEqual(Vehicle(noise_seed=1, motor_mismatch=0.05).motor_mismatch, 0.05)
+        self.assertTrue(DEFAULT_ROBOT_NOISE["randomize_mismatch_side"])
+
+
 if __name__ == "__main__":
     unittest.main()

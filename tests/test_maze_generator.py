@@ -103,8 +103,8 @@ class RandomMazeWorldTests(unittest.TestCase):
         )
         for random_maze, (_, world), limit in zip(first.mazes, first.worlds, first.step_limits):
             self.assertEqual(limit, course_step_limit(random_maze.maze, start=random_maze.start))
-            self.assertAlmostEqual(world.vehicle.x_pos, random_maze.start[0], delta=0.4)
-            self.assertAlmostEqual(world.vehicle.y_pos, random_maze.start[1], delta=0.4)
+            self.assertAlmostEqual(world.vehicle.x_pos, random_maze.start[0], delta=0.4 + 1e-9)
+            self.assertAlmostEqual(world.vehicle.y_pos, random_maze.start[1], delta=0.4 + 1e-9)
 
         first.run(3000)
         self.assertEqual([world.steps for _, world in first.worlds], first.step_limits)

@@ -1,0 +1,28 @@
+PLAIN-WORLD BEHAVIOR (50 mazes); last two columns: in the v2 walls-hurt world
+robot                  group                       clear  speed  touch%   bias explore  goal | goal v2 died v2
+seed3                  parent                      0.150   0.49    15.8  +0.85    0.43  0.70 |    0.44    0.54
+seed2                  parent                      0.138   0.46    18.2  -0.88    0.43  0.80 |    0.44    0.52
+fear                   parent                      0.203   0.24    30.0  -0.10    0.38  0.52 |    0.52    0.44
+seed3_safe_0           safe control                0.150   0.49    15.8  +0.85    0.43  0.70 |    0.44    0.54
+seed2_safe_0           safe control                0.139   0.45    14.9  -0.92    0.41  0.78 |    0.50    0.50
+fear_safe_0            safe control                0.116   0.39    40.1  -0.14    0.48  0.72 |    0.42    0.58
+fear_safe_1            safe control                0.117   0.48    19.4  -0.17    0.55  0.78 |    0.54    0.44
+seed3_A (30 gen)       walls hurt v1 (loophole)    0.138   0.58    25.7  +0.62    0.43  0.66 |    0.36    0.64
+seed2_A (30 gen)       walls hurt v1 (loophole)    0.157   0.42    21.6  -0.85    0.40  0.70 |    0.48    0.50
+fear_walls_hurt_0      walls hurt v1 (loophole)    0.136   0.33    37.9  +0.06    0.47  0.54 |    0.46    0.54
+fear_walls_hurt_1      walls hurt v1 (loophole)    0.131   0.57    18.0  -0.15    0.53  0.90 |    0.68    0.32
+seed3_walls_hurt_v2_0  walls hurt v2               0.150   0.56    13.3  +0.81    0.41  0.72 |    0.48    0.52
+seed2_walls_hurt_v2_0  walls hurt v2               0.151   0.45    17.3  -0.86    0.41  0.78 |    0.50    0.48
+fear_walls_hurt_v2_0   walls hurt v2               0.162   0.32    28.4  -0.08    0.45  0.56 |    0.54    0.46
+fear_walls_hurt_v2_1   walls hurt v2               0.204   0.32    38.8  -0.12    0.41  0.52 |    0.48    0.52
+
+v2 minus safe control, per lineage (plain world)
+  seed3  wall_clearance -0.000; speed +0.066; pct_steps_in_collision -2.457; goal_reached +0.020
+  seed2  wall_clearance +0.012; speed -0.005; pct_steps_in_collision +2.449; goal_reached +0.000
+  fear   wall_clearance +0.067; speed -0.112; pct_steps_in_collision +3.827; goal_reached -0.210
+
+fear lineages, clearance gen 0 -> last:
+  safe 0: 0.181 -> 0.116
+  safe 1: 0.204 -> 0.114
+  v2 0: 0.181 -> 0.157
+  v2 1: 0.172 -> 0.182

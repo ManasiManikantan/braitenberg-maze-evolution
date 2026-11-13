@@ -58,5 +58,35 @@ class HiddenLightTests(unittest.TestCase):
         self.assertAlmostEqual(near.left_light, normal.left_light)
 
 
+class BatteryTests(unittest.TestCase):
+    def test_energy_runs_out_at_motor_cost(self):
+        world = World(maze=box(), vehicle=vehicle(Fixed(0.5, 0.5)), energy=10.0)
+        world.run(100)
+        self.assertTrue(world.out_of_energy and world.stopped)
+        self.assertEqual(world.steps, 10)                 # 1.0 energy per step
+        self.assertAlmostEqual(world.energy_used, 10.0)
+
+    def test_energy_per_step_metric(self):
+        from evolution.metrics import record_run, run_metrics
+        result = run_metrics(record_run(Fixed(0.25, -0.5), box(), max_steps=40, light_occlusion=None,
+                                        noise_stdev=0.0, robot_noise={}))
+        self.assertAlmostEqual(result["energy_per_step"], 0.75)
+
+
+class DeadEndGoalTests(unittest.TestCase):
+    def test_goal_moves_to_a_dead_end(self):
+        from sim.maze_generator import dead_end_cells, generate_perfect_maze, with_goal_in_dead_end
+        for seed in range(5):
+            rng = np.random.default_rng(seed)
+            plain = generate_perfect_maze(rng, size=12.0, min_route_cells=2, max_route_cells=8,
+                                          mirror_probability=0.5)
+            moved = with_goal_in_dead_end(plain, rng)
+            ends = dead_end_cells(plain.maze)
+            self.assertGreaterEqual(len(ends), 2)
+            self.assertIn(tuple(moved.maze.goal), [tuple(e) for e in ends])
+            self.assertNotEqual(tuple(moved.maze.goal), tuple(plain.start))
+            self.assertEqual(len(moved.maze.walls), len(plain.maze.walls))
+
+
 if __name__ == "__main__":
     unittest.main()

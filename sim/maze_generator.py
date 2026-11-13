@@ -176,3 +176,33 @@ def generate_perfect_maze(
 
 
 __all__ = ["RandomMaze", "generate_perfect_maze", "maze_from_passages"]
+
+
+def dead_end_cells(maze, cell_size=4.0):
+	"""Centres of the cells with exactly one open side (walls on three sides)."""
+	columns = int(round(maze.width / cell_size))
+	rows = int(round(maze.height / cell_size))
+	ends = []
+	for column in range(columns):
+		for row in range(rows):
+			centre = (maze.x_min + (column + 0.5) * cell_size, maze.y_min + (row + 0.5) * cell_size)
+			open_sides = sum(
+				maze.raycast(centre, direction, cell_size) >= cell_size - 1e-6
+				for direction in ((1, 0), (-1, 0), (0, 1), (0, -1))
+			)
+			if open_sides == 1:
+				ends.append(centre)
+	return ends
+
+
+def with_goal_in_dead_end(random_maze, rng, cell_size=4.0):
+	"""Copy of ``random_maze`` with the goal moved to a random dead end (not the start cell)."""
+	maze = random_maze.maze
+	start = random_maze.start
+	ends = [c for c in dead_end_cells(maze, cell_size)
+			if abs(c[0] - start[0]) > 1e-6 or abs(c[1] - start[1]) > 1e-6]
+	goal = ends[int(rng.integers(len(ends)))]
+	moved = Maze(width=maze.width, height=maze.height, walls=maze.interior_walls, obstacles=[],
+				 goal=goal, goal_radius=maze.goal_radius)
+	return RandomMaze(moved, start, random_maze.start_heading, None, random_maze.mirrored)
+

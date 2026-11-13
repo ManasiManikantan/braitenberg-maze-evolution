@@ -11,11 +11,17 @@ class World:
 
 	def __init__(self, maze=None, vehicle=None, goal=None, goal_radius=None,
 			 goal_tolerance=None, revisit_cell_size=1.0, revisit_trigger=2,
-			 stagnation_limit=80, progress_tolerance=0.25, health=None, damage_per_hit=1.0):
+			 stagnation_limit=80, progress_tolerance=0.25, health=None, damage_per_hit=1.0,
+			 energy=None):
 		"""``health`` (None = off) turns on "walls hurt": every new collision
 		(entering contact, not every step spent pinned against a wall) costs
 		``damage_per_hit``; at 0 the robot is ``dead`` and the run ends without
 		reaching the goal. ``contact_entries`` counts new collisions either way.
+
+		``energy`` (None = off) turns on the battery: every step costs
+		|left motor| + |right motor| (the clipped commands); when it reaches 0
+		the robot is ``out_of_energy`` and the run ends without the goal.
+		``stopped`` is True once the robot is dead or out of energy.
 		"""
 		self.maze = Maze() if maze is None else maze
 		self.vehicle = Vehicle() if vehicle is None else vehicle
@@ -44,6 +50,11 @@ class World:
 		self.health = health
 		self.damage_per_hit = damage_per_hit
 		self.dead = False
+		if energy is not None and energy <= 0:
+			raise ValueError("energy must be positive or None")
+		self.energy = energy
+		self.out_of_energy = False
+		self.energy_used = 0.0
 		self.contact_entries = 0
 		self._in_contact = False
 		self.steps = 0
@@ -95,7 +106,7 @@ class World:
 
 	def step(self):
 		"""Advance the simulation by one sense-think-move cycle."""
-		if self.reached_goal or self.dead:
+		if self.reached_goal or self.stopped:
 			return self.vehicle
 		old_position = (self.vehicle.x_pos, self.vehicle.y_pos)
 		self.vehicle.sense(self.maze, self.goal)
@@ -109,6 +120,11 @@ class World:
 					self.health -= self.damage_per_hit
 					self.dead = self.health <= 0
 		self._in_contact = bool(collided)
+		cost = abs(self.vehicle.left_motor) + abs(self.vehicle.right_motor)
+		self.energy_used += cost
+		if self.energy is not None:
+			self.energy -= cost
+			self.out_of_energy = self.energy <= 0
 		new_position = (self.vehicle.x_pos, self.vehicle.y_pos)
 		if math.hypot(new_position[0] - old_position[0],
 					  new_position[1] - old_position[1]) > 1e-8:
@@ -130,12 +146,17 @@ class World:
 				self.stagnant_steps = 0
 		return self.vehicle
 
+	@property
+	def stopped(self):
+		"""True once the run has ended early (dead or out of energy)."""
+		return self.dead or self.out_of_energy
+
 	def run(self, steps):
 		"""Advance the simulation for ``steps`` cycles and return the vehicle."""
 		if steps < 0:
 			raise ValueError("steps must be non-negative")
 		for _ in range(steps):
-			if self.reached_goal or self.dead:
+			if self.reached_goal or self.stopped:
 				break
 			self.step()
 		return self.vehicle

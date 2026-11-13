@@ -11,6 +11,8 @@ Behavior measures (all dimensionless):
   driving backwards counts as moving; a blocked (colliding) step has speed 0.
 - ``reverse_fraction``: share of steps driving backwards (forward speed < 0),
   in [0, 1].
+- ``energy_per_step``: mean |left motor| + |right motor| (clipped commands) per
+  step, in [0, 2]; the battery world's cost per step.
 - ``wall_clearance``: mean over steps of the closest distance-sensor reading /
   sensor range, in [0, 1] (0 = touching something ahead or to the side).
 - ``turning_bias``: sum of turn rates / sum of |turn rates|, in [-1, 1].
@@ -39,7 +41,7 @@ from evolution.fitness import PATH_CELL_SIZE, _collision_grid, path_distances
 from sim.robot import DEFAULT_ROBOT_NOISE, Vehicle
 from sim.world import World
 
-BEHAVIOR_MEASURES = ("speed", "reverse_fraction", "wall_clearance", "turning_bias", "exploration", "wall_side")
+BEHAVIOR_MEASURES = ("speed", "reverse_fraction", "energy_per_step", "wall_clearance", "turning_bias", "exploration", "wall_side")
 PERFORMANCE_MEASURES = ("goal_reached", "path_progress", "steps", "pct_steps_in_collision")
 EXPLORATION_CELL_SIZE = 4.0
 WALL_SIDE_CLOSE_DISTANCE = 1.0
@@ -49,9 +51,13 @@ class RunRecord:
     """Per-step record of one run."""
 
     def __init__(self, maze, positions, headings, speeds, collided, sensor_distances,
-                 reached_goal, sensor_range, max_speed, radius, side_clearances=None, world=None):
+                 reached_goal, sensor_range, max_speed, radius, side_clearances=None, world=None,
+                 motors=None):
         self.maze = maze
         self.world = world                                         # the finished World, if kept
+        # (steps, 2): clipped left/right motor commands
+        self.motors = (np.zeros((len(self.speeds), 2)) if motors is None
+                       else np.asarray(motors, dtype=float).reshape(-1, 2))
         self.positions = np.asarray(positions, dtype=float)        # (steps + 1, 2)
         self.headings = np.asarray(headings, dtype=float)          # (steps + 1,)
         self.speeds = np.asarray(speeds, dtype=float)              # (steps,)
@@ -91,12 +97,13 @@ def record_run(controller, maze, start=(0.0, 0.0), heading=0.0, max_steps=None, 
     if max_steps is None:
         max_steps = course_step_limit(maze, start=start)
     headings = [vehicle.orientation]
-    speeds, collided, sensors, sides = [], [], [], []
-    while world.steps < max_steps and not world.reached_goal and not world.dead:
+    speeds, collided, sensors, sides, motors = [], [], [], [], []
+    while world.steps < max_steps and not world.reached_goal and not world.stopped:
         before = world.collisions
         world.step()
         headings.append(vehicle.orientation)
         speeds.append(vehicle.velocity)
+        motors.append((vehicle.left_motor, vehicle.right_motor))
         collided.append(world.collisions > before)
         sensors.append((vehicle.left_distance, vehicle.front_distance, vehicle.right_distance))
         h = vehicle.orientation
@@ -109,7 +116,7 @@ def record_run(controller, maze, start=(0.0, 0.0), heading=0.0, max_steps=None, 
             on_step(vehicle)
     return RunRecord(maze, world.position_history, headings, speeds, collided, sensors,
                      world.reached_goal, vehicle.sensor_range, vehicle.vel_gain, vehicle.radius,
-                     side_clearances=sides, world=world)
+                     side_clearances=sides, world=world, motors=motors)
 
 
 def _reachable_cells(maze, start, radius, cell_size):
@@ -148,10 +155,11 @@ def run_metrics(record, cell_size=EXPLORATION_CELL_SIZE, close_distance=WALL_SID
     """Return the behavior and performance measures of one ``RunRecord``."""
     steps = record.steps
     if steps == 0:
-        speed = reverse = clearance = bias = 0.0
+        speed = reverse = energy = clearance = bias = 0.0
     else:
         speed = float(np.clip(np.mean(np.abs(record.speeds)) / record.max_speed, 0.0, 1.0))
         reverse = float(np.mean(record.speeds < 0))
+        energy = float(np.mean(np.abs(record.motors).sum(axis=1)))
         clearance = float(np.mean(record.sensor_distances.min(axis=1)) / record.sensor_range)
         turns = np.diff(record.headings)
         turns = (turns + np.pi) % (2 * np.pi) - np.pi
@@ -177,6 +185,7 @@ def run_metrics(record, cell_size=EXPLORATION_CELL_SIZE, close_distance=WALL_SID
     return {
         "speed": speed,
         "reverse_fraction": reverse,
+        "energy_per_step": energy,
         "wall_clearance": clearance,
         "turning_bias": bias,
         "exploration": float(exploration),

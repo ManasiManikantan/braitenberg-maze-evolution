@@ -1,0 +1,17 @@
+seed,version,course,goals,trials,median_steps_to_goal,turning_bias_100_mazes,random_maze_goal_rate
+1,original,course_A,0,10,,-0.637,0.68
+1,original,course_B,9,10,1331,-0.637,0.68
+1,mirrored,course_A,6,10,1901,0.654,0.57
+1,mirrored,course_B,0,10,,0.654,0.57
+2,original,course_A,0,10,,-0.891,0.82
+2,original,course_B,10,10,1261,-0.891,0.82
+2,mirrored,course_A,10,10,1209,0.887,0.72
+2,mirrored,course_B,0,10,,0.887,0.72
+3,original,course_A,1,10,1685,0.769,0.62
+3,original,course_B,2,10,2401,0.769,0.62
+3,mirrored,course_A,1,10,3321,-0.78,0.57
+3,mirrored,course_B,3,10,1997,-0.78,0.57
+4,original,course_A,2,10,3109,0.462,0.69
+4,original,course_B,2,10,1806,0.462,0.69
+4,mirrored,course_A,3,10,1917,-0.493,0.69
+4,mirrored,course_B,4,10,2214,-0.493,0.69

@@ -7,8 +7,10 @@ the mean and standard deviation of every measure.
 
 Behavior measures (all dimensionless):
 
-- ``speed``: mean forward speed / maximum forward speed, in [0, 1]. Reversing
-  counts as 0; a blocked (colliding) step has speed 0.
+- ``speed``: mean |forward speed| / maximum forward speed, in [0, 1], so
+  driving backwards counts as moving; a blocked (colliding) step has speed 0.
+- ``reverse_fraction``: share of steps driving backwards (forward speed < 0),
+  in [0, 1].
 - ``wall_clearance``: mean over steps of the closest distance-sensor reading /
   sensor range, in [0, 1] (0 = touching something ahead or to the side).
 - ``turning_bias``: sum of turn rates / sum of |turn rates|, in [-1, 1].
@@ -37,7 +39,7 @@ from evolution.fitness import PATH_CELL_SIZE, _collision_grid, path_distances
 from sim.robot import DEFAULT_ROBOT_NOISE, Vehicle
 from sim.world import World
 
-BEHAVIOR_MEASURES = ("speed", "wall_clearance", "turning_bias", "exploration", "wall_side")
+BEHAVIOR_MEASURES = ("speed", "reverse_fraction", "wall_clearance", "turning_bias", "exploration", "wall_side")
 PERFORMANCE_MEASURES = ("goal_reached", "path_progress", "steps", "pct_steps_in_collision")
 EXPLORATION_CELL_SIZE = 4.0
 WALL_SIDE_CLOSE_DISTANCE = 1.0
@@ -47,8 +49,9 @@ class RunRecord:
     """Per-step record of one run."""
 
     def __init__(self, maze, positions, headings, speeds, collided, sensor_distances,
-                 reached_goal, sensor_range, max_speed, radius, side_clearances=None):
+                 reached_goal, sensor_range, max_speed, radius, side_clearances=None, world=None):
         self.maze = maze
+        self.world = world                                         # the finished World, if kept
         self.positions = np.asarray(positions, dtype=float)        # (steps + 1, 2)
         self.headings = np.asarray(headings, dtype=float)          # (steps + 1,)
         self.speeds = np.asarray(speeds, dtype=float)              # (steps,)
@@ -69,13 +72,15 @@ class RunRecord:
 
 def record_run(controller, maze, start=(0.0, 0.0), heading=0.0, max_steps=None, noise_seed=None,
                noise_stdev=DEFAULT_NOISE_STDEV, robot_noise=None, light_occlusion="blocked",
-               navigation_heuristics=False):
+               navigation_heuristics=False, on_step=None):
     """Run ``controller`` in ``maze`` and return a ``RunRecord``.
 
     ``max_steps`` defaults to the maze's ``course_step_limit`` from ``start``.
     ``light_occlusion`` should match the controller's inputs (``None`` for a
     3-input controller; controllers that read only the first three inputs,
-    like the wall followers, work with either).
+    like the wall followers, work with either). ``on_step(vehicle)``, if
+    given, is called after every step (e.g. to log controller inputs). The
+    finished ``World`` is kept as ``record.world``.
     """
     robot_noise = DEFAULT_ROBOT_NOISE if robot_noise is None else robot_noise
     vehicle = Vehicle(controller=controller, noise_stdev=noise_stdev, noise_seed=noise_seed,
@@ -99,9 +104,11 @@ def record_run(controller, maze, start=(0.0, 0.0), heading=0.0, max_steps=None, 
             maze.raycast(centre, (-math.sin(h), math.cos(h)), vehicle.sensor_range) - vehicle.radius,
             maze.raycast(centre, (math.sin(h), -math.cos(h)), vehicle.sensor_range) - vehicle.radius,
         ))
+        if on_step is not None:
+            on_step(vehicle)
     return RunRecord(maze, world.position_history, headings, speeds, collided, sensors,
                      world.reached_goal, vehicle.sensor_range, vehicle.vel_gain, vehicle.radius,
-                     side_clearances=sides)
+                     side_clearances=sides, world=world)
 
 
 def _reachable_cells(maze, start, radius, cell_size):
@@ -140,9 +147,10 @@ def run_metrics(record, cell_size=EXPLORATION_CELL_SIZE, close_distance=WALL_SID
     """Return the behavior and performance measures of one ``RunRecord``."""
     steps = record.steps
     if steps == 0:
-        speed = clearance = bias = 0.0
+        speed = reverse = clearance = bias = 0.0
     else:
-        speed = float(np.clip(np.mean(np.maximum(record.speeds, 0.0)) / record.max_speed, 0.0, 1.0))
+        speed = float(np.clip(np.mean(np.abs(record.speeds)) / record.max_speed, 0.0, 1.0))
+        reverse = float(np.mean(record.speeds < 0))
         clearance = float(np.mean(record.sensor_distances.min(axis=1)) / record.sensor_range)
         turns = np.diff(record.headings)
         turns = (turns + np.pi) % (2 * np.pi) - np.pi
@@ -167,6 +175,7 @@ def run_metrics(record, cell_size=EXPLORATION_CELL_SIZE, close_distance=WALL_SID
         progress = 1.0 if record.reached_goal else 0.0
     return {
         "speed": speed,
+        "reverse_fraction": reverse,
         "wall_clearance": clearance,
         "turning_bias": bias,
         "exploration": float(exploration),

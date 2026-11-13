@@ -1,0 +1,15 @@
+set,controller,runs,goal_within_current_limit,goal_no_limit,median_limit,median_steps_to_goal,median_steps_over_limit,p90_steps_over_limit,pct_steps_in_collision,failures_with_limit,failures_no_limit
+random_12x12,left_wall,50,0.4,0.92,320,628,1.9,15.82,16.1,stuck: 4; time-out (goal reached later): 26,stuck: 4
+random_12x12,right_wall,50,0.42,0.84,320,404,0.98,12.02,18.0,loop: 1; stuck: 7; time-out (goal reached later): 21,loop: 1; stuck: 7
+random_16x16,left_wall,50,0.34,0.86,480,772,1.93,7.41,16.5,stuck: 7; time-out (goal reached later): 26,stuck: 7
+random_16x16,right_wall,50,0.32,0.76,480,675,1.52,23.66,14.5,still exploring at cap: 4; stuck: 8; time-out (goal reached later): 22,still exploring at cap: 4; stuck: 8
+random_20x20,left_wall,50,0.26,0.84,700,1614,2.48,18.94,19.1,loop: 1; still exploring at cap: 1; stuck: 6; time-out (goal reached later): 29,loop: 1; still exploring at cap: 1; stuck: 6
+random_20x20,right_wall,50,0.14,0.6,700,1997,2.35,14.83,23.3,loop: 4; still exploring at cap: 4; stuck: 12; time-out (goal reached later): 23,loop: 4; still exploring at cap: 4; stuck: 12
+course_1,left_wall,5,0.0,0.2,600,19156,31.93,31.93,79.6,still exploring at cap: 1; stuck: 3; time-out (goal reached later): 1,still exploring at cap: 1; stuck: 3
+course_1,right_wall,5,0.0,1.0,600,2867,4.78,12.03,38.3,time-out (goal reached later): 5,
+course_2,left_wall,5,0.0,0.0,600,,,,79.6,still exploring at cap: 2; stuck: 3,still exploring at cap: 2; stuck: 3
+course_2,right_wall,5,0.0,0.0,600,,,,82.0,stuck: 5,stuck: 5
+course_3,left_wall,5,0.0,0.6,740,18082,24.44,25.87,67.5,stuck: 2; time-out (goal reached later): 3,stuck: 2
+course_3,right_wall,5,0.0,0.0,740,,,,66.3,still exploring at cap: 1; stuck: 4,still exploring at cap: 1; stuck: 4
+course_4,left_wall,5,0.0,0.4,600,18292,30.49,30.88,79.9,stuck: 3; time-out (goal reached later): 2,stuck: 3
+course_4,right_wall,5,0.0,1.0,600,8789,14.65,19.43,65.5,time-out (goal reached later): 5,

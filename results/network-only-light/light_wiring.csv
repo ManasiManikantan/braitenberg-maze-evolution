@@ -1,0 +1,11 @@
+mode,seed,dL/dlightL,dL/dlightR,dR/dlightL,dR/dlightR,code_wiring,turns,speed_with_light,behaves_like,turn_strength,share_of_states_with_light,mean_light_reading
+blocked,seed0,0.055,0.065,1.546,1.528,crossed excitatory,away from light,faster,fear (2a-like),-0.028,0.38,0.02
+blocked,seed1,0.693,0.224,-0.01,0.015,same-side excitatory,toward light,faster,aggression (2b-like),0.494,0.43,0.048
+blocked,seed2,0.728,0.1,-0.083,-0.003,same-side excitatory,toward light,faster,aggression (2b-like),0.708,0.41,0.027
+blocked,seed3,0.02,0.009,1.489,3.343,same-side excitatory,toward light,faster,aggression (2b-like),1.865,0.45,0.059
+blocked,seed4,4.917,2.231,0.932,0.614,same-side excitatory,toward light,faster,aggression (2b-like),2.368,0.45,0.048
+through,seed0,-0.01,0.032,0.948,1.291,same-side excitatory,toward light,faster,aggression (2b-like),0.3,0.9,0.184
+through,seed1,0.007,0.045,0.782,1.418,same-side excitatory,toward light,faster,aggression (2b-like),0.598,0.9,0.173
+through,seed2,-0.0,-0.015,0.003,1.313,same-side excitatory,toward light,faster,aggression (2b-like),1.324,0.9,0.179
+through,seed3,0.658,0.619,-0.141,0.038,crossed excitatory,toward light,faster,aggression (2b-like),0.218,0.91,0.172
+through,seed4,-0.273,-0.246,0.085,0.721,same-side excitatory,toward light,faster,aggression (2b-like),0.609,0.95,0.187

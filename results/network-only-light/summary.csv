@@ -1,0 +1,31 @@
+controller,test_set,runs,goal_success,mean_path_progress,pct_steps_in_collision,longest_pinned_mean
+light_blocked,random test mazes (50),250,0.16,0.149,23.8,78.1
+light_blocked,course 1,25,0.2,0.239,10.1,39.8
+light_blocked,course 2,25,0.0,-0.221,11.8,41.7
+light_blocked,course 3,25,0.0,-0.252,7.5,27.6
+light_blocked,course 4,25,0.24,0.291,7.7,26.0
+light_blocked,courses 1-4,100,0.11,0.014,9.2,33.8
+untrained_blocked,random test mazes (50),250,0.004,0.022,39.4,132.3
+untrained_blocked,course 1,25,0.04,-0.013,25.4,102.6
+untrained_blocked,course 2,25,0.0,-0.085,30.1,110.9
+untrained_blocked,course 3,25,0.0,-0.078,42.5,263.7
+untrained_blocked,course 4,25,0.0,-0.029,24.3,71.7
+untrained_blocked,courses 1-4,100,0.01,-0.051,31.2,137.2
+light_through,random test mazes (50),250,0.124,0.19,45.5,172.6
+light_through,course 1,25,0.44,0.534,22.9,94.4
+light_through,course 2,25,0.0,0.051,22.8,72.0
+light_through,course 3,25,0.0,-0.063,33.5,191.5
+light_through,course 4,25,0.08,0.059,31.2,111.3
+light_through,courses 1-4,100,0.13,0.145,28.1,117.3
+untrained_through,random test mazes (50),250,0.004,0.004,43.3,160.4
+untrained_through,course 1,25,0.0,-0.079,19.0,40.8
+untrained_through,course 2,25,0.0,-0.077,19.1,37.4
+untrained_through,course 3,25,0.0,-0.155,43.8,264.2
+untrained_through,course 4,25,0.0,0.015,26.8,101.1
+untrained_through,courses 1-4,100,0.0,-0.074,28.1,110.9
+previous_no_light,random test mazes (50),250,0.164,0.134,60.2,259.9
+previous_no_light,course 1,25,0.16,0.1,40.7,151.4
+previous_no_light,course 2,25,0.0,-0.26,60.4,295.1
+previous_no_light,course 3,25,0.0,0.061,20.6,136.1
+previous_no_light,course 4,25,0.04,-0.033,47.5,160.3
+previous_no_light,courses 1-4,100,0.05,-0.033,41.1,185.7

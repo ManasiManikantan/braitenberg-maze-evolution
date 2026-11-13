@@ -66,8 +66,18 @@ class RobotNoiseTests(unittest.TestCase):
         curved = run(Vehicle(noise_stdev=0, controller=FixedController(0.5, 0.5),
                              navigation_heuristics=False, motor_mismatch=0.05))
         self.assertAlmostEqual(straight.vehicle.orientation, 0.0)
-        # orientation += turn_gain * (left - right); a stronger left wheel increases it
-        self.assertGreater(curved.vehicle.orientation, 0.0)
+        # orientation += turn_gain * (right - left); a stronger left wheel turns right
+        self.assertLess(curved.vehicle.orientation, 0.0)
+
+    def test_faster_right_wheel_turns_left_like_a_real_robot(self):
+        turning_left = run(Vehicle(noise_stdev=0, controller=FixedController(0.2, 0.8),
+                                   navigation_heuristics=False), steps=20)
+        turning_right = run(Vehicle(noise_stdev=0, controller=FixedController(0.8, 0.2),
+                                    navigation_heuristics=False), steps=20)
+        self.assertGreater(turning_left.vehicle.orientation, 0.0)
+        self.assertGreater(turning_left.vehicle.y_pos, 0.0)
+        self.assertLess(turning_right.vehicle.orientation, 0.0)
+        self.assertLess(turning_right.vehicle.y_pos, 0.0)
 
     def test_motor_noise_varies_trajectories(self):
         ends = {

@@ -364,13 +364,26 @@ class Vehicle(Point):
         return float(np.clip(1.0 - clearance / required_clearance, 0.0, 1.0))
 
     def think(self):
-        """Map sensors to motors, then apply a proximity-based safety override."""
+        """Map sensors to motors, then apply a proximity-based safety override.
+
+        ``left_motor`` / ``right_motor`` are the physical left and right wheels:
+        ``move`` turns the robot left when the right wheel is faster. The
+        hand-coded heuristics below were written for the earlier swapped
+        convention, so their outputs are swapped once here to keep their
+        behavior unchanged. Without heuristics the controller (or Braitenberg
+        wiring) output is used as is.
+        """
+        if self._think():
+            self.left_motor, self.right_motor = self.right_motor, self.left_motor
+
+    def _think(self):
+        """Set the motors; return True when they use the legacy swapped labels."""
         left_clearance = max(0.0, self.left_distance - self.radius)
         front_clearance = self.front_distance
         right_clearance = max(0.0, self.right_distance - self.radius)
         if self.navigation_heuristics and self._reverse_steps_remaining > 0:
             self.left_motor = self.right_motor = -self.reverse_speed
-            return
+            return True
 
         if (
             self.navigation_heuristics
@@ -399,7 +412,7 @@ class Vehicle(Point):
                 -1.0,
                 1.0,
             ))
-            return
+            return True
 
         if self.navigation_heuristics and self._aligning_to_opening:
             heading_error = np.arctan2(
@@ -410,7 +423,7 @@ class Vehicle(Point):
                 turn_direction = 1 if heading_error > 0 else -1
                 self.left_motor = self.turn_speed * turn_direction
                 self.right_motor = -self.turn_speed * turn_direction
-                return
+                return True
             self._aligning_to_opening = False
 
         if self.navigation_heuristics and self._turning_to_clear:
@@ -430,7 +443,7 @@ class Vehicle(Point):
                         )
                     self.left_motor = turn_magnitude * turn_direction
                     self.right_motor = -turn_magnitude * turn_direction
-                    return
+                    return True
                 self._scan_phase = "sweep"
                 self._scan_rotation = 0.0
                 self._turn_direction = 1
@@ -442,16 +455,16 @@ class Vehicle(Point):
                 if self._scan_best_distance <= 0.0:
                     self.reverse()
                     self.left_motor = self.right_motor = -self.reverse_speed
-                    return
+                    return True
                 self._opening_heading = self._scan_best_heading
                 self._aligning_to_opening = True
-                return self.think()
+                return self._think()
             turn_magnitude = self.turn_speed
             if self.turn_gain > 0:
                 turn_magnitude = min(turn_magnitude, remaining_rotation / (2 * self.turn_gain))
             self.left_motor = turn_magnitude * self._turn_direction
             self.right_motor = -turn_magnitude * self._turn_direction
-            return
+            return True
 
         both_rays_blocked = (
             left_clearance <= self._required_clearance(self.left_hit_type)
@@ -467,7 +480,7 @@ class Vehicle(Point):
             self._record_scan_opening()
             self.left_motor = self.turn_speed * self._turn_direction
             self.right_motor = -self.turn_speed * self._turn_direction
-            return
+            return True
 
         if self.controller is not None:
             left_motor, right_motor = self.controller.forward(self.controller_inputs())
@@ -483,7 +496,7 @@ class Vehicle(Point):
         if not self.navigation_heuristics:
             self.left_motor = float(np.clip(left_motor, -1.0, 1.0))
             self.right_motor = float(np.clip(right_motor, -1.0, 1.0))
-            return
+            return False
 
         left_hazard = self._hazard(left_clearance, self.left_hit_type)
         right_hazard = self._hazard(right_clearance, self.right_hit_type)
@@ -499,7 +512,7 @@ class Vehicle(Point):
             ))
             self.left_motor = float(np.clip(base_speed + opening_turn, -1.0, 1.0))
             self.right_motor = float(np.clip(base_speed - opening_turn, -1.0, 1.0))
-            return
+            return True
 
         if max(left_hazard, front_hazard, right_hazard) == 0.0:
             left_motor = max(float(left_motor), self.cruise_speed)
@@ -510,7 +523,7 @@ class Vehicle(Point):
         self.right_motor = float(np.clip(
             right_motor - self.avoidance_gain * max(right_hazard, front_hazard), -1.0, 1.0
         ))
-
+        return True
 
     def _begin_avoidance_turn(self):
         self._turning_to_clear = True
@@ -555,7 +568,8 @@ class Vehicle(Point):
         """Update orientation and velocity, then advance the body position.
 
         Differential drive kinematics:
-          - Turning rate  = turn_gain × (left_motor − right_motor) + noise
+          - Turning rate  = turn_gain × (right_motor − left_motor) + noise
+            (a faster right wheel turns the robot left, like a real robot)
           - Forward speed = vel_gain  × average(left_motor, right_motor)
 
         Adding noise to the orientation simulates imperfect actuators and
@@ -571,7 +585,7 @@ class Vehicle(Point):
             left_noise, right_noise = self._noise_rng.normal(0.0, self.motor_noise_stdev, 2)
             left_wheel += left_noise
             right_wheel += right_noise
-        self.orientation += self.turn_gain * (left_wheel - right_wheel) + noise
+        self.orientation += self.turn_gain * (right_wheel - left_wheel) + noise
         self.velocity = self.vel_gain * ((right_wheel + left_wheel) / 2)
         old_position = (self.x_pos, self.y_pos)
         self.update_body_pos()

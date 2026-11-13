@@ -36,6 +36,10 @@ class GeneticAlgorithm:
 	given; pass ``{}`` to disable): sensor, per-wheel motor, fixed wheel
 	mismatch, and start pose noise, with a fresh reproducible noise seed for
 	every evaluation.
+
+	``light_occlusion`` (``None``, ``"blocked"``, or ``"through"``) adds the two
+	goal-light sensors; the network then has 5 inputs instead of 3 and the
+	default world enables light sensing in that occlusion mode.
 	"""
 
 	def __init__(
@@ -53,7 +57,10 @@ class GeneticAlgorithm:
 		network_only=True,
 		initial_output_bias=DEFAULT_OUTPUT_BIAS,
 		robot_noise=None,
+		light_occlusion=None,
 	):
+		if light_occlusion not in (None, "blocked", "through"):
+			raise ValueError("light_occlusion must be None, 'blocked', or 'through'")
 		if population_size < 2:
 			raise ValueError("population_size must be at least 2")
 		if hidden_size < 1:
@@ -84,6 +91,8 @@ class GeneticAlgorithm:
 		self.network_only = network_only
 		self.initial_output_bias = float(initial_output_bias)
 		self.robot_noise = dict(DEFAULT_ROBOT_NOISE if robot_noise is None else robot_noise)
+		self.light_occlusion = light_occlusion
+		self.input_size = 3 if light_occlusion is None else 5
 		self.rng = np.random.default_rng(seed)
 		# Separate stream so per-evaluation noise seeds do not perturb the
 		# GA's own selection/mutation random numbers.
@@ -93,14 +102,14 @@ class GeneticAlgorithm:
 				evaluate_outcome_fitness if network_only else evaluate_shaped_fitness
 			)
 		self.fitness_function = fitness_function
-		self.genome_size = 6 * hidden_size + 2
+		self.genome_size = (self.input_size + 3) * hidden_size + 2
 		self.population = self.initialize_population()
 		self.generation = 0
 		self.best_individual = None
 		self.history = []
 
 	def _random_genome(self):
-		input_hidden = self.rng.normal(0.0, 1.0, (3, self.hidden_size))
+		input_hidden = self.rng.normal(0.0, 1.0, (self.input_size, self.hidden_size))
 		bias_hidden = np.zeros(self.hidden_size)
 		hidden_output = self.rng.normal(0.0, 1.0, (self.hidden_size, 2))
 		bias_output = np.full(2, self.initial_output_bias)
@@ -117,7 +126,7 @@ class GeneticAlgorithm:
 
 	def encode_network(self, network):
 		"""Flatten a compatible neural network into this algorithm's genome format."""
-		if network.weights_input_hidden.shape != (3, self.hidden_size):
+		if network.weights_input_hidden.shape != (self.input_size, self.hidden_size):
 			raise ValueError("network hidden size does not match the genetic algorithm")
 		if network.weights_hidden_output.shape != (self.hidden_size, 2):
 			raise ValueError("network hidden size does not match the genetic algorithm")
@@ -134,11 +143,11 @@ class GeneticAlgorithm:
 		if genome.shape != (self.genome_size,):
 			raise ValueError(f"genome must contain exactly {self.genome_size} values")
 
-		network = NeuralNetwork(hidden_size=self.hidden_size, seed=0)
+		network = NeuralNetwork(hidden_size=self.hidden_size, seed=0, input_size=self.input_size)
 		cursor = 0
-		input_hidden_size = 3 * self.hidden_size
+		input_hidden_size = self.input_size * self.hidden_size
 		network.weights_input_hidden = genome[cursor:cursor + input_hidden_size].reshape(
-			3, self.hidden_size
+			self.input_size, self.hidden_size
 		).copy()
 		cursor += input_hidden_size
 		network.bias_hidden = genome[cursor:cursor + self.hidden_size].copy()
@@ -189,6 +198,7 @@ class GeneticAlgorithm:
 			noise_stdev=self.evaluation_noise_stdev,
 			navigation_heuristics=not self.network_only,
 			noise_seed=int(self._noise_seed_rng.integers(2**32)),
+			light_occlusion=self.light_occlusion,
 			**self.robot_noise,
 		))
 

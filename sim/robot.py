@@ -18,10 +18,14 @@ DEFAULT_ROBOT_NOISE = {
     "motor_mismatch": 0.05,         # left gain 1.025, right gain 0.975
     "start_position_stdev": 0.2,    # maze units, clipped to +/-0.4
     "start_heading_stdev": 0.1,     # radians (~6 degrees), clipped to +/-0.2
+    "light_noise_stdev": 0.02,      # light intensity units (0-1 scale), like 2% sensor noise
 }
 
 
 DEFAULT_SIDE_SENSOR_ANGLE = np.deg2rad(60.0)
+DEFAULT_LIGHT_SENSOR_ANGLE = np.deg2rad(45.0)
+DEFAULT_LIGHT_FALLOFF_DISTANCE = 5.0
+LIGHT_OCCLUSION_MODES = ("blocked", "through")
 
 
 def euclidean_distance(point1, point2):
@@ -53,6 +57,17 @@ class Vehicle(Point):
                       ray, from 0 (parallel) to pi/2. Default 60 degrees.
         start_position: Starting (x, y) of the body centre. Default origin.
         start_heading: Starting heading in radians. Default 0 (+x).
+        light_occlusion: None (default, no light sensors), "blocked" (walls
+                      block the light from the goal), or "through" (walls do
+                      not). When set, the controller receives five inputs:
+                      left, front, right distance, then left and right light.
+        light_sensor_angle: Angle (radians) of each light sensor from the
+                      heading; sensors sit on the body edge at +/- this angle
+                      and face outward along it. Default 45 degrees.
+        light_falloff_distance: Distance at which intensity halves before
+                      the angular factor: I = max(0, cos a) / (1 + (d / d0)^2).
+        light_noise_stdev: Gaussian noise added to each light reading (then
+                      clipped to [0, 1]). Zero disables it.
         turn_gain:    How strongly the sensor difference steers the vehicle.
                       Larger values produce sharper turns.
         noise_stdev:  Standard deviation of Gaussian noise added to the
@@ -95,7 +110,9 @@ class Vehicle(Point):
                  sensor_noise_stdev=0.0, motor_noise_stdev=0.0, motor_mismatch=0.0,
                  start_position_stdev=0.0, start_heading_stdev=0.0,
                  side_sensor_angle=DEFAULT_SIDE_SENSOR_ANGLE,
-                 start_position=(0.0, 0.0), start_heading=0.0):
+                 start_position=(0.0, 0.0), start_heading=0.0,
+                 light_occlusion=None, light_sensor_angle=DEFAULT_LIGHT_SENSOR_ANGLE,
+                 light_falloff_distance=DEFAULT_LIGHT_FALLOFF_DISTANCE, light_noise_stdev=0.0):
         super().__init__(float(start_position[0]), float(start_position[1]))
         # The vehicle starts at start_position facing start_heading (default:
         # the origin, facing +x), optionally jittered by start_position_stdev /
@@ -142,6 +159,18 @@ class Vehicle(Point):
         if not 0 <= side_sensor_angle <= np.pi / 2:
             raise ValueError("side_sensor_angle must be between 0 and pi/2 radians")
         self.side_sensor_angle = float(side_sensor_angle)
+        if light_occlusion is not None and light_occlusion not in LIGHT_OCCLUSION_MODES:
+            raise ValueError("light_occlusion must be None, 'blocked', or 'through'")
+        if not 0 <= light_sensor_angle <= np.pi / 2:
+            raise ValueError("light_sensor_angle must be between 0 and pi/2 radians")
+        if light_falloff_distance <= 0 or light_noise_stdev < 0:
+            raise ValueError("light_falloff_distance must be positive and light noise non-negative")
+        self.light_occlusion = light_occlusion
+        self.light_sensor_angle = float(light_sensor_angle)
+        self.light_falloff_distance = float(light_falloff_distance)
+        self.light_noise_stdev = light_noise_stdev
+        self.left_light = 0.0
+        self.right_light = 0.0
         self.sensor_noise_stdev = sensor_noise_stdev
         self.motor_noise_stdev = motor_noise_stdev
         self.motor_mismatch = motor_mismatch
@@ -231,6 +260,41 @@ class Vehicle(Point):
             self.orientation - self.side_sensor_angle,
         )
 
+    def controller_inputs(self):
+        """Inputs passed to the controller: 3 distance readings, plus 2 light readings if enabled."""
+        inputs = (self.left_sensor, self.front_sensor, self.right_sensor)
+        if self.light_occlusion is not None:
+            inputs += (self.left_light, self.right_light)
+        return inputs
+
+    def light_sensor_poses(self):
+        """Return ((x, y, facing_angle) for the left light sensor, same for the right)."""
+        poses = []
+        for side in (1, -1):
+            angle = self.orientation + side * self.light_sensor_angle
+            poses.append((self.x_pos + self.radius * np.cos(angle),
+                          self.y_pos + self.radius * np.sin(angle), angle))
+        return poses
+
+    def _sense_light(self, maze, goal):
+        goal_x, goal_y = (goal.x_pos, goal.y_pos) if hasattr(goal, "x_pos") else goal
+        readings = []
+        for sensor_x, sensor_y, facing in self.light_sensor_poses():
+            dx, dy = goal_x - sensor_x, goal_y - sensor_y
+            distance = float(np.hypot(dx, dy))
+            if distance < 1e-9:
+                intensity = 1.0
+            else:
+                cosine = (dx * np.cos(facing) + dy * np.sin(facing)) / distance
+                intensity = max(0.0, cosine) / (1.0 + (distance / self.light_falloff_distance)**2)
+                if (self.light_occlusion == "blocked" and intensity > 0.0
+                        and maze.raycast((sensor_x, sensor_y), (dx, dy), distance) < distance - 1e-6):
+                    intensity = 0.0
+            readings.append(intensity)
+        if self.light_noise_stdev > 0:
+            readings = np.array(readings) + self._noise_rng.normal(0.0, self.light_noise_stdev, 2)
+        return tuple(float(np.clip(value, 0.0, 1.0)) for value in readings)
+
     def sense(self, maze, goal=None):
         """Read obstacle proximity and check whether the goal is visible.
 
@@ -268,6 +332,8 @@ class Vehicle(Point):
         self.left_sensor = 1.0 - self.left_distance / self.sensor_range
         self.front_sensor = 1.0 - self.front_distance / self.sensor_range
         self.right_sensor = 1.0 - self.right_distance / self.sensor_range
+        if self.light_occlusion is not None and goal is not None:
+            self.left_light, self.right_light = self._sense_light(maze, goal)
         self.goal_visible = False
         self._goal_distance = np.inf
         if goal is not None:
@@ -404,9 +470,7 @@ class Vehicle(Point):
             return
 
         if self.controller is not None:
-            left_motor, right_motor = self.controller.forward(
-                (self.left_sensor, self.front_sensor, self.right_sensor)
-            )
+            left_motor, right_motor = self.controller.forward(self.controller_inputs())
         elif self.wiring == "crossed":
             left_motor = self.right_sensor
             right_motor = self.left_sensor

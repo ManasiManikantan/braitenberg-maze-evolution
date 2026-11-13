@@ -35,6 +35,9 @@ DEFAULT_REFERENCE_SPEED = 0.05
 DEFAULT_TRAINING = "random_mazes"
 DEFAULT_MAZES_PER_EVALUATION = 3
 DEFAULT_MIRROR_PROBABILITY = 0.0
+# Goal-light sensors for network-only evolution: "blocked" (walls block the
+# light), "through" (they do not), or None (3-input network, no light).
+DEFAULT_LIGHT_OCCLUSION = "blocked"
 HISTORY_FIELDS = (
     "training_seed",
     "generation",
@@ -94,7 +97,7 @@ class MultiCourseWorld:
     def __init__(self, controller, noise_stdev=0.0, noise_seed_base=TRAINING_NOISE_SEED_BASE,
                  network_only=True, robot_noise=None,
                  time_limit_factor=DEFAULT_TIME_LIMIT_FACTOR,
-                 reference_speed=DEFAULT_REFERENCE_SPEED):
+                 reference_speed=DEFAULT_REFERENCE_SPEED, light_occlusion=None):
         robot_noise = DEFAULT_ROBOT_NOISE if robot_noise is None else robot_noise
         self.worlds = [
             (
@@ -106,6 +109,7 @@ class MultiCourseWorld:
                         noise_stdev=noise_stdev,
                         noise_seed=noise_seed_base + difficulty,
                         navigation_heuristics=not network_only,
+                        light_occlusion=light_occlusion,
                         **robot_noise,
                     ),
                 ),
@@ -137,7 +141,8 @@ class RandomMazeWorld:
                  mirror_probability=DEFAULT_MIRROR_PROBABILITY, noise_stdev=0.0,
                  noise_seed_base=TRAINING_NOISE_SEED_BASE, network_only=True, robot_noise=None,
                  time_limit_factor=DEFAULT_TIME_LIMIT_FACTOR,
-                 reference_speed=DEFAULT_REFERENCE_SPEED, maze_options=None):
+                 reference_speed=DEFAULT_REFERENCE_SPEED, maze_options=None,
+                 light_occlusion=None):
         if mazes_per_evaluation < 1:
             raise ValueError("mazes_per_evaluation must be at least 1")
         robot_noise = DEFAULT_ROBOT_NOISE if robot_noise is None else robot_noise
@@ -158,6 +163,7 @@ class RandomMazeWorld:
                         navigation_heuristics=not network_only,
                         start_position=random_maze.start,
                         start_heading=random_maze.start_heading,
+                        light_occlusion=light_occlusion,
                         **robot_noise,
                     ),
                 ),
@@ -280,6 +286,7 @@ def evaluate_controller(
     robot_noise=None,
     time_limit_factor=DEFAULT_TIME_LIMIT_FACTOR,
     reference_speed=DEFAULT_REFERENCE_SPEED,
+    light_occlusion=None,
 ):
     """Evaluate one controller on every course with reproducible noise.
 
@@ -297,6 +304,7 @@ def evaluate_controller(
             noise_stdev=noise_stdev,
             noise_seed=noise_seed,
             navigation_heuristics=use_heuristics,
+            light_occlusion=light_occlusion,
             **robot_noise,
         )
         world = World(maze=maze, vehicle=vehicle)
@@ -392,11 +400,13 @@ def run_experiment(
     training=DEFAULT_TRAINING,
     mazes_per_evaluation=DEFAULT_MAZES_PER_EVALUATION,
     mirror_probability=DEFAULT_MIRROR_PROBABILITY,
+    light_occlusion=DEFAULT_LIGHT_OCCLUSION,
 ):
     if training not in ("random_mazes", "courses"):
         raise ValueError("training must be 'random_mazes' or 'courses'")
     robot_noise = DEFAULT_ROBOT_NOISE if robot_noise is None else robot_noise
-    time_limits = {"time_limit_factor": time_limit_factor, "reference_speed": reference_speed}
+    world_options = {"time_limit_factor": time_limit_factor, "reference_speed": reference_speed,
+                   "light_occlusion": light_occlusion}
     courses = make_evaluation_courses()
     records = []
     genomes = {}
@@ -413,6 +423,7 @@ def run_experiment(
                 evaluate_course_set_outcome if network_only else evaluate_course_set
             ),
             network_only=network_only,
+            light_occlusion=light_occlusion,
         )
         genomes[f"random_seed{training_seed}"] = algorithm.population[0].genome.copy()
         random_controller = algorithm.decode_genome(
@@ -432,7 +443,7 @@ def run_experiment(
             steps,
             noise_stdev,
             robot_noise,
-            **time_limits,
+            **world_options,
         )
         records.extend(baseline)
         write_results(output_path, records)
@@ -463,7 +474,7 @@ def run_experiment(
                     noise_seed_base=noise_seed_base,
                     network_only=network_only,
                     robot_noise=robot_noise,
-                    **time_limits,
+                    **world_options,
                 )
             return MultiCourseWorld(
                 controller,
@@ -471,7 +482,7 @@ def run_experiment(
                 noise_seed_base=noise_seed_base,
                 network_only=network_only,
                 robot_noise=robot_noise,
-                **time_limits,
+                **world_options,
             )
 
         best = algorithm.run(
@@ -502,7 +513,7 @@ def run_experiment(
                 steps,
                 noise_stdev,
                 robot_noise,
-                **time_limits,
+                **world_options,
             ))
         write_results(output_path, records)
 
@@ -537,6 +548,10 @@ def main():
     parser.add_argument("--mazes-per-evaluation", type=int,
                         default=DEFAULT_MAZES_PER_EVALUATION,
                         help="random mazes sampled for each training evaluation (default: 3)")
+    parser.add_argument("--light-occlusion", choices=("blocked", "through", "none"),
+                        default=DEFAULT_LIGHT_OCCLUSION,
+                        help="goal-light sensors: walls block the light ('blocked', default), "
+                             "walls do not ('through'), or no light inputs ('none')")
     parser.add_argument("--mirror-probability", type=float,
                         default=DEFAULT_MIRROR_PROBABILITY,
                         help="probability of mirroring each random maze left-right (default: 0)")
@@ -577,6 +592,7 @@ def main():
         training="courses" if arguments.train_on_courses else "random_mazes",
         mazes_per_evaluation=arguments.mazes_per_evaluation,
         mirror_probability=arguments.mirror_probability,
+        light_occlusion=None if arguments.light_occlusion == "none" else arguments.light_occlusion,
     )
 
 

@@ -85,6 +85,31 @@ def _interior_walls(passages, columns, rows, cell_size, x_min, y_min):
 	return walls
 
 
+def maze_from_passages(passages, columns, rows, cell_size, goal_cell, start_cell,
+					   goal_radius=1.0):
+	"""Build a centred grid maze from open passages between adjacent cells.
+
+	``passages`` is an iterable of ``(cell, cell)`` pairs; every other edge
+	between adjacent cells is a wall. Returns ``(maze, start_position)`` with
+	the goal and start at the centres of ``goal_cell`` and ``start_cell``.
+	"""
+	passages = {frozenset(pair) for pair in passages}
+	for pair in passages:
+		(c1, r1), (c2, r2) = tuple(pair)
+		if abs(c1 - c2) + abs(r1 - r2) != 1:
+			raise ValueError("passages must join adjacent cells")
+	x_min = -columns * cell_size / 2
+	y_min = -rows * cell_size / 2
+
+	def centre(cell):
+		return (x_min + (cell[0] + 0.5) * cell_size, y_min + (cell[1] + 0.5) * cell_size)
+
+	walls = _interior_walls(passages, columns, rows, cell_size, x_min, y_min)
+	maze = Maze(width=columns * cell_size, height=rows * cell_size, walls=walls, obstacles=[],
+				goal=centre(goal_cell), goal_radius=goal_radius)
+	return maze, centre(start_cell)
+
+
 def generate_perfect_maze(
 	rng,
 	size=20.0,
@@ -150,4 +175,4 @@ def generate_perfect_maze(
 	return RandomMaze(maze, start, heading, lengths[start_cell], mirrored)
 
 
-__all__ = ["RandomMaze", "generate_perfect_maze"]
+__all__ = ["RandomMaze", "generate_perfect_maze", "maze_from_passages"]

@@ -6,7 +6,7 @@ from evolution.experiment import (
     MultiCourseWorld,
     course_step_limit,
     evaluate_controller,
-    make_evaluation_courses,
+    make_legacy_courses,
 )
 from sim.maze import Maze
 from sim.robot import Vehicle
@@ -19,7 +19,7 @@ class FixedController:
 
 class ExperimentTests(unittest.TestCase):
     def test_evaluation_set_contains_training_and_held_out_courses(self):
-        courses = make_evaluation_courses()
+        courses = make_legacy_courses()
 
         self.assertEqual(len(courses), 6)
         self.assertEqual(
@@ -34,7 +34,7 @@ class ExperimentTests(unittest.TestCase):
             self.assertFalse(maze.collides(maze.goal, maze.goal_radius))
 
     def test_held_out_courses_have_body_clear_routes_to_goal(self):
-        courses = make_evaluation_courses()[4:]
+        courses = make_legacy_courses()[4:]
         routes = (
             [(0.0, 0.0), (0.0, 4.0), (3.5, 4.0), (3.5, 0.0),
              (6.5, 0.0), (6.5, -7.0), (8.0, -7.0)],
@@ -53,7 +53,7 @@ class ExperimentTests(unittest.TestCase):
                     self.assertFalse(maze.collides(position, radius=1.0), position)
 
     def test_evaluation_records_requested_comparison_metrics(self):
-        course = make_evaluation_courses()[:1]
+        course = make_legacy_courses()[:1]
         records = evaluate_controller(
             NeuralNetwork(seed=4),
             "random_init",
@@ -119,7 +119,7 @@ class TimeLimitTests(unittest.TestCase):
             course_step_limit(maze, 2.0, 0.0)
 
     def test_training_worlds_stop_at_each_course_limit(self):
-        limited = MultiCourseWorld(StandStill())
+        limited = MultiCourseWorld(StandStill(), time_limit_factor=2.0)
         limited.run(3000)
         self.assertEqual([world.steps for _, world in limited.worlds], [600, 600, 740, 600])
 
@@ -127,13 +127,14 @@ class TimeLimitTests(unittest.TestCase):
         unlimited.run(1000)
         self.assertEqual([world.steps for _, world in unlimited.worlds], [1000] * 4)
 
-        capped = MultiCourseWorld(StandStill())
+        capped = MultiCourseWorld(StandStill(), time_limit_factor=2.0)
         capped.run(500)
         self.assertEqual([world.steps for _, world in capped.worlds], [500] * 4)
 
     def test_evaluation_uses_per_course_limits(self):
         courses = [("course_3", "training", Maze(difficulty=3))]
-        record, = evaluate_controller(StandStill(), "still", "neural_only", 0, courses, 3000, 0.0)
+        record, = evaluate_controller(StandStill(), "still", "neural_only", 0, courses, 3000, 0.0,
+                                      time_limit_factor=2.0)
         self.assertEqual(record["evaluation_steps"], 740)
         record, = evaluate_controller(StandStill(), "still", "neural_only", 0, courses, 3000, 0.0,
                                       time_limit_factor=0)

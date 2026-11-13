@@ -11,6 +11,7 @@ from evolution.fitness import evaluate_fitness, evaluate_outcome_fitness, path_d
 from evolution.genetic_algorithm import GeneticAlgorithm
 from sim.maze import Maze
 from sim.maze_generator import generate_perfect_maze
+from sim.held_out_courses import TEST_COURSE_NAMES, make_test_course
 from sim.robot import DEFAULT_ROBOT_NOISE, Vehicle
 from sim.world import World
 
@@ -18,7 +19,7 @@ TRAINING_COURSES = (1, 2, 3, 4)
 DEFAULT_SEEDS = 3
 DEFAULT_GENERATIONS = 10
 DEFAULT_POPULATION_SIZE = 30
-DEFAULT_STEPS = 5000
+DEFAULT_STEPS = 10000  # overall cap; per-maze time limits normally end runs first
 DEFAULT_NOISE_STDEV = 0.05
 TRAINING_NOISE_SEED_BASE = 900000
 SUCCESS_BONUS = 100.0
@@ -28,19 +29,22 @@ COLLISION_SCORE_FLOOR = -100.0
 # 0.05 maze units/step is ~75% of top speed (1/15); evolved network-only
 # controllers averaged 0.052 on steps when they were not blocked by a wall.
 # A factor of 0 (or None) disables per-course limits ("no time pressure").
-DEFAULT_TIME_LIMIT_FACTOR = 2.0
+# 8x leaves room for strategies that explore dead ends (a wall follower's
+# route is typically 2-5x the shortest route).
+DEFAULT_TIME_LIMIT_FACTOR = 8.0
 DEFAULT_REFERENCE_SPEED = 0.05
-# Network-only training uses freshly generated random mazes by default; the
-# built-in courses are kept as a held-out test set.
+# Network-only training uses random 12 x 12 loop-free mazes by default: each
+# generation samples DEFAULT_MAZES_PER_EVALUATION mazes shared by the whole
+# population. Test courses A/B/C (sim.held_out_courses) are never trained on.
 DEFAULT_TRAINING = "random_mazes"
-DEFAULT_MAZES_PER_EVALUATION = 3
+DEFAULT_MAZES_PER_EVALUATION = 8
+DEFAULT_MAZE_OPTIONS = {"size": 12.0, "min_route_cells": 2, "max_route_cells": 8}
 DEFAULT_MIRROR_PROBABILITY = 0.0
 # Goal-light sensors for network-only evolution: "blocked" (walls block the
 # light), "through" (they do not), or None (3-input network, no light).
 DEFAULT_LIGHT_OCCLUSION = "blocked"
-# Random-maze curriculum: (fraction of the run at which the stage starts,
-# generate_perfect_maze options). Small mazes with short routes first so early
-# generations can reach the goal; the last stage matches the test mazes.
+# Optional random-maze curriculum (off by default; pass curriculum= to use it):
+# (fraction of the run at which the stage starts, generate_perfect_maze options).
 DEFAULT_CURRICULUM = (
     (0.0, {"size": 12.0, "min_route_cells": 2, "max_route_cells": 3}),
     (1 / 3, {"size": 16.0, "min_route_cells": 2, "max_route_cells": 5}),
@@ -154,30 +158,43 @@ class MultiCourseWorld:
             world.run(_episode_steps(steps, limit))
 
 
-class RandomMazeWorld:
-    """Run one controller on freshly generated random mazes.
+def sample_random_mazes(maze_rng, count=DEFAULT_MAZES_PER_EVALUATION,
+                        mirror_probability=DEFAULT_MIRROR_PROBABILITY, maze_options=None):
+    """Generate ``count`` random perfect mazes (``RandomMaze`` objects)."""
+    maze_options = DEFAULT_MAZE_OPTIONS if maze_options is None else maze_options
+    return [
+        generate_perfect_maze(maze_rng, mirror_probability=mirror_probability, **maze_options)
+        for _ in range(count)
+    ]
 
-    Each instance samples ``mazes_per_evaluation`` new perfect mazes from
-    ``maze_rng`` (see ``sim.maze_generator.generate_perfect_maze``), each with
-    a random start cell and heading, and runs every maze for at most its own
-    ``course_step_limit`` measured from that start. Same interface as
-    ``MultiCourseWorld``, so the course-set fitness functions apply.
+
+class RandomMazeWorld:
+    """Run one controller on random mazes.
+
+    Uses ``mazes`` (a list of ``RandomMaze``) when given, e.g. the same mazes
+    for a whole generation; otherwise samples ``mazes_per_evaluation`` new
+    perfect mazes from ``maze_rng`` with ``maze_options`` (default
+    ``DEFAULT_MAZE_OPTIONS``, 12 x 12). Each maze starts at its random start
+    cell and heading and runs for at most its own ``course_step_limit``
+    measured from that start. Same interface as ``MultiCourseWorld``, so the
+    course-set fitness functions apply.
     """
 
-    def __init__(self, controller, maze_rng, mazes_per_evaluation=DEFAULT_MAZES_PER_EVALUATION,
+    def __init__(self, controller, maze_rng=None, mazes_per_evaluation=DEFAULT_MAZES_PER_EVALUATION,
                  mirror_probability=DEFAULT_MIRROR_PROBABILITY, noise_stdev=0.0,
                  noise_seed_base=TRAINING_NOISE_SEED_BASE, network_only=True, robot_noise=None,
                  time_limit_factor=DEFAULT_TIME_LIMIT_FACTOR,
                  reference_speed=DEFAULT_REFERENCE_SPEED, maze_options=None,
-                 light_occlusion=None):
-        if mazes_per_evaluation < 1:
-            raise ValueError("mazes_per_evaluation must be at least 1")
+                 light_occlusion=None, mazes=None):
         robot_noise = DEFAULT_ROBOT_NOISE if robot_noise is None else robot_noise
-        maze_options = {} if maze_options is None else maze_options
-        self.mazes = [
-            generate_perfect_maze(maze_rng, mirror_probability=mirror_probability, **maze_options)
-            for _ in range(mazes_per_evaluation)
-        ]
+        if mazes is None:
+            if maze_rng is None:
+                raise ValueError("give either mazes or maze_rng")
+            if mazes_per_evaluation < 1:
+                raise ValueError("mazes_per_evaluation must be at least 1")
+            mazes = sample_random_mazes(maze_rng, mazes_per_evaluation, mirror_probability,
+                                        maze_options)
+        self.mazes = list(mazes)
         self.worlds = [
             (
                 f"random_maze_{index}",
@@ -262,7 +279,22 @@ def evaluate_course_set_outcome(multi_course_world):
 
 
 def make_evaluation_courses():
-    """Return four training courses and two distinct, held-out layouts."""
+    """Return the held-out 12 x 12 test courses A, B, C.
+
+    Entries are ``(name, group, maze, start_position, start_heading)``.
+    """
+    entries = []
+    for name in TEST_COURSE_NAMES:
+        maze, start, heading = make_test_course(name)
+        entries.append((f"course_{name}", "test", maze, start, heading))
+    return entries
+
+
+def make_legacy_courses():
+    """Return the old courses 1-4 and two old held-out layouts (kept, unused).
+
+    Entries are ``(name, group, maze)``; the robot starts at the origin facing +x.
+    """
     courses = [
         (f"course_{difficulty}", "training", Maze(difficulty=difficulty))
         for difficulty in TRAINING_COURSES
@@ -317,6 +349,9 @@ def evaluate_controller(
 ):
     """Evaluate one controller on every course with reproducible noise.
 
+    ``courses`` entries are ``(name, group, maze)`` (start at the origin facing
+    +x) or ``(name, group, maze, start_position, start_heading)``.
+
     ``robot_noise`` (default ``DEFAULT_ROBOT_NOISE``) and the per-course step
     limits apply to every controller and mode so comparisons share the same
     conditions.
@@ -324,7 +359,9 @@ def evaluate_controller(
     robot_noise = DEFAULT_ROBOT_NOISE if robot_noise is None else robot_noise
     use_heuristics = behavior_mode == "full"
     records = []
-    for course_index, (course_name, course_group, maze) in enumerate(courses):
+    for course_index, entry in enumerate(courses):
+        course_name, course_group, maze = entry[:3]
+        start, heading = entry[3:5] if len(entry) >= 5 else ((0.0, 0.0), 0.0)
         noise_seed = training_seed * 10000 + course_index
         vehicle = Vehicle(
             controller=controller,
@@ -332,11 +369,13 @@ def evaluate_controller(
             noise_seed=noise_seed,
             navigation_heuristics=use_heuristics,
             light_occlusion=light_occlusion,
+            start_position=start,
+            start_heading=heading,
             **robot_noise,
         )
         world = World(maze=maze, vehicle=vehicle)
         world.run(_episode_steps(
-            steps, course_step_limit(maze, time_limit_factor, reference_speed)
+            steps, course_step_limit(maze, time_limit_factor, reference_speed, start=start)
         ))
         metrics = evaluate_fitness(world)
         records.append({
@@ -428,7 +467,8 @@ def run_experiment(
     mazes_per_evaluation=DEFAULT_MAZES_PER_EVALUATION,
     mirror_probability=DEFAULT_MIRROR_PROBABILITY,
     light_occlusion=DEFAULT_LIGHT_OCCLUSION,
-    curriculum=DEFAULT_CURRICULUM,
+    curriculum=None,
+    maze_options=None,
 ):
     if training not in ("random_mazes", "courses"):
         raise ValueError("training must be 'random_mazes' or 'courses'")
@@ -479,34 +519,43 @@ def run_experiment(
 
         mode_label = "network only" if network_only else "with heuristics"
         training_label = (
-            f"{mazes_per_evaluation} fresh random mazes per evaluation"
+            f"{mazes_per_evaluation} random mazes per generation"
             if training == "random_mazes" else "courses 1-4"
         )
         print(f"Seed {training_seed}: evolving on {training_label} ({mode_label})...")
-        # Fresh, reproducible noise (and mazes) for every training evaluation,
-        # so start poses, sensor/motor noise, and layouts cannot be memorized.
+        # New, reproducible mazes and noise every generation, shared by the
+        # whole population so individuals are compared on the same conditions.
         training_noise_rng = np.random.default_rng(
             [TRAINING_NOISE_SEED_BASE, training_seed]
         )
         maze_rng = np.random.default_rng([TRAINING_NOISE_SEED_BASE, training_seed, 1])
+        generation_conditions = {}
+
+        def conditions_for(generation):
+            if generation not in generation_conditions:
+                options = (curriculum_maze_options(generation, generations, curriculum)
+                           if curriculum else maze_options)
+                generation_conditions.clear()
+                generation_conditions[generation] = (
+                    sample_random_mazes(maze_rng, mazes_per_evaluation, mirror_probability,
+                                        options),
+                    int(training_noise_rng.integers(2**31)),
+                )
+            return generation_conditions[generation]
 
         def world_factory(controller):
-            noise_seed_base = int(training_noise_rng.integers(2**31))
             if training == "random_mazes":
+                mazes, noise_seed_base = conditions_for(algorithm.generation)
                 return RandomMazeWorld(
                     controller,
-                    maze_rng,
-                    mazes_per_evaluation=mazes_per_evaluation,
-                    mirror_probability=mirror_probability,
+                    mazes=mazes,
                     noise_stdev=noise_stdev,
                     noise_seed_base=noise_seed_base,
                     network_only=network_only,
                     robot_noise=robot_noise,
-                    maze_options=curriculum_maze_options(
-                        algorithm.generation, generations, curriculum
-                    ),
                     **world_options,
                 )
+            noise_seed_base = int(training_noise_rng.integers(2**31))
             return MultiCourseWorld(
                 controller,
                 noise_stdev=noise_stdev,
@@ -572,16 +621,16 @@ def main():
                         help="disable sensor, motor, wheel-mismatch, and start-pose noise")
     parser.add_argument("--time-limit-factor", type=float, default=DEFAULT_TIME_LIMIT_FACTOR,
                         help="per-course step limit as a multiple of the shortest-path "
-                             "driving time at --reference-speed; 0 disables (default: 2)")
+                             "driving time at --reference-speed; 0 disables (default: 8)")
     parser.add_argument("--train-on-courses", action="store_true",
                         help="train on courses 1-4 instead of fresh random mazes "
                              "(default: courses are a held-out test set only)")
     parser.add_argument("--mazes-per-evaluation", type=int,
                         default=DEFAULT_MAZES_PER_EVALUATION,
-                        help="random mazes sampled for each training evaluation (default: 3)")
-    parser.add_argument("--no-curriculum", action="store_true",
-                        help="train on full-size random mazes from the first generation "
-                             "(default: grow maze size from 12 to 16 to 20 units)")
+                        help="random mazes per generation, shared by the population (default: 8)")
+    parser.add_argument("--curriculum", action="store_true",
+                        help="grow random-maze size 12 -> 16 -> 20 over the run "
+                             "(default: 12 x 12 mazes throughout)")
     parser.add_argument("--light-occlusion", choices=("blocked", "through", "none"),
                         default=DEFAULT_LIGHT_OCCLUSION,
                         help="goal-light sensors: walls block the light ('blocked', default), "
@@ -627,7 +676,7 @@ def main():
         mazes_per_evaluation=arguments.mazes_per_evaluation,
         mirror_probability=arguments.mirror_probability,
         light_occlusion=None if arguments.light_occlusion == "none" else arguments.light_occlusion,
-        curriculum=None if arguments.no_curriculum else DEFAULT_CURRICULUM,
+        curriculum=DEFAULT_CURRICULUM if arguments.curriculum else None,
     )
 
 

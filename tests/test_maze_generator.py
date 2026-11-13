@@ -6,12 +6,18 @@ import numpy as np
 from evolution import fitness
 from evolution.experiment import (
     DEFAULT_CURRICULUM,
+    DEFAULT_MAZE_OPTIONS,
+    DEFAULT_MAZES_PER_EVALUATION,
+    DEFAULT_TIME_LIMIT_FACTOR,
+    make_evaluation_courses,
+    sample_random_mazes,
     RandomMazeWorld,
     course_step_limit,
     curriculum_maze_options,
     evaluate_course_set_outcome,
 )
 from evolution.fitness import path_distances
+from sim.held_out_courses import COURSE_SPECS, make_test_course
 from sim.maze_generator import generate_perfect_maze
 from sim.robot import Vehicle
 
@@ -133,6 +139,54 @@ class CurriculumTests(unittest.TestCase):
         world = RandomMazeWorld(StandStill(), np.random.default_rng(0), mazes_per_evaluation=2,
                                 maze_options=curriculum_maze_options(0, 60))
         self.assertEqual([m.maze.width for m in world.mazes], [12.0, 12.0])
+
+
+class HeldOutCourseTests(unittest.TestCase):
+    def test_courses_are_perfect_12x12_mazes_with_4_unit_corridors(self):
+        for name, spec in COURSE_SPECS.items():
+            maze, start, heading = make_test_course(name)
+            self.assertEqual((maze.width, maze.height), (12.0, 12.0))
+            # perfect maze on 3 x 3 cells: 8 passages, 12 - 8 = 4 unit wall pieces inside
+            self.assertEqual(len(spec["passages"]), 8)
+            wall_units = sum(math.dist(a, b) / 4.0 for a, b in maze.interior_walls)
+            self.assertAlmostEqual(wall_units, 4.0)
+            self.assertGreaterEqual(maze.clearance(start, 1.0), 1.0 - 1e-9)
+            self.assertTrue(np.isfinite(path_distances(maze, [start], 1.0)[0]))
+
+    def test_course_b_mirrors_course_a(self):
+        maze_a, start_a, heading_a = make_test_course("A")
+        maze_b, start_b, heading_b = make_test_course("B")
+        mirrored = sorted(((-x1, y1), (-x2, y2)) for (x1, y1), (x2, y2) in maze_a.interior_walls)
+        self.assertEqual(sorted(tuple(sorted(w)) for w in maze_b.interior_walls),
+                         sorted(tuple(sorted(w)) for w in mirrored))
+        self.assertEqual(start_b, (-start_a[0], start_a[1]))
+        self.assertEqual(maze_b.goal, (-maze_a.goal[0], maze_a.goal[1]))
+        self.assertEqual(heading_a, heading_b)  # both face north, mirror-symmetric
+
+    def test_evaluation_courses_are_the_held_out_set(self):
+        names = [entry[0] for entry in make_evaluation_courses()]
+        self.assertEqual(names, ["course_A", "course_B", "course_C"])
+        self.assertTrue(all(len(entry) == 5 for entry in make_evaluation_courses()))
+
+
+class TrainingDefaultsTests(unittest.TestCase):
+    def test_defaults(self):
+        self.assertEqual(DEFAULT_TIME_LIMIT_FACTOR, 8.0)
+        self.assertEqual(DEFAULT_MAZES_PER_EVALUATION, 8)
+        self.assertEqual(DEFAULT_MAZE_OPTIONS["size"], 12.0)
+        mazes = sample_random_mazes(np.random.default_rng(0))
+        self.assertEqual(len(mazes), 8)
+        self.assertTrue(all(m.maze.width == 12.0 for m in mazes))
+
+    def test_shared_mazes_give_identical_conditions(self):
+        mazes = sample_random_mazes(np.random.default_rng(1), 2)
+        first = RandomMazeWorld(StandStill(), mazes=mazes, noise_seed_base=5)
+        second = RandomMazeWorld(StandStill(), mazes=mazes, noise_seed_base=5)
+        self.assertEqual(first.step_limits, second.step_limits)
+        for (_, a), (_, b) in zip(first.worlds, second.worlds):
+            self.assertEqual((a.vehicle.x_pos, a.vehicle.orientation), (b.vehicle.x_pos, b.vehicle.orientation))
+        with self.assertRaises(ValueError):
+            RandomMazeWorld(StandStill())
 
 
 if __name__ == "__main__":

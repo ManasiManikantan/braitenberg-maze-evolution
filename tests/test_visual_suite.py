@@ -44,7 +44,7 @@ from matplotlib.patches import Circle, Rectangle
 from controller.network import NeuralNetwork
 from evolution.experiment import (
     evaluate_controller,
-    make_evaluation_courses,
+    make_legacy_courses,
 )
 from evolution.fitness import evaluate_fitness
 from evolution.genetic_algorithm import GeneticAlgorithm
@@ -121,11 +121,11 @@ class MazeTests(unittest.TestCase):
         self.assertEqual(len(layouts), 4)
 
     def test_goal_is_never_inside_a_wall_on_any_course(self):
-        for _, _, maze in make_evaluation_courses():
+        for _, _, maze in make_legacy_courses():
             self.assertFalse(maze.collides(maze.goal, maze.goal_radius))
 
     def test_start_position_is_free_on_every_course(self):
-        for name, _, maze in make_evaluation_courses():
+        for name, _, maze in make_legacy_courses():
             with self.subTest(course=name):
                 self.assertFalse(maze.collides((0.0, 0.0), 1.0))
 
@@ -472,13 +472,13 @@ class GeneticAlgorithmTests(unittest.TestCase):
 
 class ExperimentTests(unittest.TestCase):
     def test_evaluation_set_has_four_training_and_two_held_out_courses(self):
-        groups = [group for _, group, _ in make_evaluation_courses()]
+        groups = [group for _, group, _ in make_legacy_courses()]
         self.assertEqual(groups, ["training"] * 4 + ["held_out"] * 2)
 
     def test_records_contain_all_requested_metrics(self):
         records = evaluate_controller(
             NeuralNetwork(seed=1), "random_init", "full", 0,
-            make_evaluation_courses()[:2], steps=100, noise_stdev=0.05)
+            make_legacy_courses()[:2], steps=100, noise_stdev=0.05)
         self.assertEqual(len(records), 2)
         for record in records:
             for key in ("goal_success", "collision_count", "completion_steps",
@@ -488,20 +488,20 @@ class ExperimentTests(unittest.TestCase):
     def test_completion_steps_blank_when_goal_not_reached(self):
         record = evaluate_controller(
             NeuralNetwork(seed=1), "random_init", "full", 0,
-            make_evaluation_courses()[:1], steps=0, noise_stdev=0.0)[0]
+            make_legacy_courses()[:1], steps=0, noise_stdev=0.0)[0]
         self.assertEqual(record["goal_success"], 0)
         self.assertEqual(record["completion_steps"], "")
 
     def test_evaluation_is_reproducible(self):
         runs = [
             evaluate_controller(None, "heuristic_only", "full", 3,
-                                make_evaluation_courses()[:2], 300, 0.05)
+                                make_legacy_courses()[:2], 300, 0.05)
             for _ in range(2)
         ]
         self.assertEqual(runs[0], runs[1])
 
     def test_different_training_seeds_use_different_noise(self):
-        courses = make_evaluation_courses()[:1]
+        courses = make_legacy_courses()[:1]
         seeds = {
             evaluate_controller(None, "h", "full", seed, courses, 0, 0.05)[0]["noise_seed"]
             for seed in (0, 1, 2)
@@ -569,7 +569,7 @@ class VisualTests(unittest.TestCase):
         self.assertGreater(path.stat().st_size, 1000)
 
     def test_visual_course_gallery(self):
-        courses = make_evaluation_courses()
+        courses = make_legacy_courses()
         figure, axes = plt.subplots(2, 3, figsize=(12, 8))
         for axis, (name, group, maze) in zip(axes.flat, courses):
             draw_maze(axis, maze, f"{name} ({group})")
@@ -578,7 +578,7 @@ class VisualTests(unittest.TestCase):
         self.assert_saved(finish_figure(figure, "01_course_gallery.png"))
 
     def test_visual_heuristic_trajectories(self):
-        courses = make_evaluation_courses()
+        courses = make_legacy_courses()
         figure, axes = plt.subplots(2, 3, figsize=(12, 8))
         for axis, (name, _, maze) in zip(axes.flat, courses):
             world = run_world(maze, 3000, noise=0.05, seed=1)
@@ -655,7 +655,7 @@ class VisualTests(unittest.TestCase):
         self.assert_saved(finish_figure(figure, "05_ga_learning_curve.png"))
 
     def test_visual_controller_comparison(self):
-        courses = make_evaluation_courses()
+        courses = make_legacy_courses()
         algorithm = GeneticAlgorithm(population_size=8, hidden_size=4, seed=0,
                                      mutation_rate=0.15, mutation_scale=0.2)
         algorithm.run(generations=3, steps=500)
@@ -772,7 +772,7 @@ class AnimationTests(unittest.TestCase):
                     self.assertGreaterEqual(world.steps, self.HEADLESS_FRAMES[-1])
 
     def test_animate_held_out_courses(self):
-        for name, _, maze in make_evaluation_courses()[4:]:
+        for name, _, maze in make_legacy_courses()[4:]:
             with self.subTest(course=name):
                 world = World(maze=maze,
                               vehicle=Vehicle(noise_stdev=0.05, noise_seed=2))

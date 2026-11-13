@@ -50,8 +50,12 @@ Files:
 - **Wall side does not separate the classes.** Most seeds sit at 0.4-0.75,
   with no clean left/right split like the wall followers' 0.78 / 0.22. Seed 4
   (a weak left-turner, wall side 0.20) is the only clear right-wall hugger.
-- **Seed 16 drives backwards** 79% of the time. Its signed speed is -0.31 of
-  maximum, so its `speed` measure (which counts reversing as 0) reads 0.01. It
-  still solves B and C 10/10. Its heading and its direction of travel turn the
-  same way, so the "right-turner" label still holds. Its sensors, however,
-  point away from where it is going.
+- **Seed 16 drives backwards.**
+  - In the original analysis, `speed` counted reversing as 0, so seed 16's speed read 0.01.
+  - With the fixed metric (mean |forward speed|; `measures_new_speed.csv`), it
+    has speed 0.32 ± 0.06 and reverse fraction 0.73 ± 0.13. It still solves B
+    and C 10/10.
+  - The other 19 seeds and both wall followers barely change; their reverse
+    fraction is 0.06 or less.
+  - Its heading and its direction of travel turn the same way, so the
+    right-turner label still holds.

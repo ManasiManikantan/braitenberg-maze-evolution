@@ -2,6 +2,7 @@ import unittest
 
 import numpy as np
 
+from controller.mirror import MirroredController
 from controller.network import NeuralNetwork
 from controller.wall_follower import WallFollower
 from evolution.metrics import (
@@ -23,21 +24,6 @@ class Fixed:
 
     def forward(self, inputs):
         return self.output
-
-
-class Mirrored:
-    """Left-right mirror of a controller: swap left/right inputs and outputs."""
-
-    def __init__(self, base):
-        self.base = base
-
-    def forward(self, inputs):
-        left, front, right = inputs[:3]
-        mirrored = [right, front, left]
-        if len(inputs) == 5:
-            mirrored += [inputs[4], inputs[3]]
-        left_motor, right_motor = self.base.forward(np.array(mirrored))
-        return np.array([right_motor, left_motor])
 
 
 def open_arena():
@@ -63,13 +49,15 @@ class TurningBiasTests(unittest.TestCase):
             network = NeuralNetwork(seed=seed)
             a = run_metrics(record_run(network, plain.maze, plain.start, plain.start_heading,
                                        max_steps=800, light_occlusion=None, **NO_NOISE))
-            b = run_metrics(record_run(Mirrored(network), mirrored.maze, mirrored.start,
+            b = run_metrics(record_run(MirroredController(network), mirrored.maze, mirrored.start,
                                        mirrored.start_heading, max_steps=800, light_occlusion=None,
                                        **NO_NOISE))
             self.assertGreater(abs(a["turning_bias"]), 0.05)
             self.assertAlmostEqual(a["turning_bias"], -b["turning_bias"], places=6)
             for name in ("speed", "wall_clearance", "exploration", "pct_steps_in_collision"):
                 self.assertAlmostEqual(a[name], b[name], places=6)
+            if not np.isnan(a["wall_side"]):
+                self.assertAlmostEqual(a["wall_side"], 1.0 - b["wall_side"], places=6)
             # The 0.25-unit shortest-path grid is not exactly mirror-symmetric
             # (a goal centre on a grid line falls in the cell to its right).
             self.assertAlmostEqual(a["path_progress"], b["path_progress"], delta=0.03)
@@ -120,6 +108,28 @@ class MeasureTests(unittest.TestCase):
             self.assertTrue(-1.0 <= run["turning_bias"] <= 1.0)
             self.assertTrue(0.0 < run["exploration"] <= 1.0)
             self.assertTrue(0.0 <= run["pct_steps_in_collision"] <= 100.0)
+
+
+class WallSideTests(unittest.TestCase):
+    def test_wall_followers_hug_their_own_side(self):
+        episodes = random_maze_episodes(12, seed=5, noise_seed_base=100)
+        left = measure_controller(WallFollower("left"), episodes)["mean"]["wall_side"]
+        right = measure_controller(WallFollower("right"), episodes)["mean"]["wall_side"]
+        self.assertGreater(left, 0.7)
+        self.assertLess(right, 0.3)
+
+    def test_wall_on_one_side_only(self):
+        corridor = Maze(width=40.0, height=40.0, walls=[((-15.0, 1.5), (15.0, 1.5))], obstacles=[],
+                        goal=(18.0, -18.0), goal_radius=1.0)
+        along = run_metrics(record_run(Fixed(0.5, 0.5), corridor, max_steps=100,
+                                       light_occlusion=None, **NO_NOISE))
+        self.assertEqual(along["wall_side"], 1.0)          # wall 0.5 units to the left
+        reverse = run_metrics(record_run(Fixed(0.5, 0.5), corridor, heading=np.pi, max_steps=100,
+                                         light_occlusion=None, **NO_NOISE))
+        self.assertEqual(reverse["wall_side"], 0.0)        # driving the other way: wall on the right
+        open_field = run_metrics(record_run(Fixed(0.5, 0.5), open_arena(), max_steps=50,
+                                            light_occlusion=None, **NO_NOISE))
+        self.assertTrue(np.isnan(open_field["wall_side"]))
 
 
 if __name__ == "__main__":

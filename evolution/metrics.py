@@ -16,6 +16,11 @@ Behavior measures (all dimensionless):
 - ``exploration``: maze cells visited / cells reachable from the start, in
   [0, 1], on a grid of ``cell_size`` squares (default 4, one corridor cell of
   the generated mazes).
+- ``wall_side``: of the steps where a wall is close (within ``close_distance``,
+  default 1 unit, of the body measured straight out to the side) on exactly
+  one side, the fraction where it is on the left, in [0, 1]. About 0.8 for
+  the hand-written left-wall follower and 0.2 for the right-wall follower;
+  NaN if no step had a wall on exactly one side.
 
 Performance measures: ``goal_reached`` (0/1), ``path_progress`` (drop in
 shortest-path distance to the goal / starting distance, as in the
@@ -32,16 +37,17 @@ from evolution.fitness import PATH_CELL_SIZE, _collision_grid, path_distances
 from sim.robot import DEFAULT_ROBOT_NOISE, Vehicle
 from sim.world import World
 
-BEHAVIOR_MEASURES = ("speed", "wall_clearance", "turning_bias", "exploration")
+BEHAVIOR_MEASURES = ("speed", "wall_clearance", "turning_bias", "exploration", "wall_side")
 PERFORMANCE_MEASURES = ("goal_reached", "path_progress", "steps", "pct_steps_in_collision")
 EXPLORATION_CELL_SIZE = 4.0
+WALL_SIDE_CLOSE_DISTANCE = 1.0
 
 
 class RunRecord:
     """Per-step record of one run."""
 
     def __init__(self, maze, positions, headings, speeds, collided, sensor_distances,
-                 reached_goal, sensor_range, max_speed, radius):
+                 reached_goal, sensor_range, max_speed, radius, side_clearances=None):
         self.maze = maze
         self.positions = np.asarray(positions, dtype=float)        # (steps + 1, 2)
         self.headings = np.asarray(headings, dtype=float)          # (steps + 1,)
@@ -52,6 +58,9 @@ class RunRecord:
         self.sensor_range = float(sensor_range)
         self.max_speed = float(max_speed)
         self.radius = float(radius)
+        # (steps, 2): wall clearance straight out to the left and right of the body
+        self.side_clearances = (np.full((len(self.speeds), 2), np.inf) if side_clearances is None
+                                else np.asarray(side_clearances, dtype=float).reshape(-1, 2))
 
     @property
     def steps(self):
@@ -76,7 +85,7 @@ def record_run(controller, maze, start=(0.0, 0.0), heading=0.0, max_steps=None, 
     if max_steps is None:
         max_steps = course_step_limit(maze, start=start)
     headings = [vehicle.orientation]
-    speeds, collided, sensors = [], [], []
+    speeds, collided, sensors, sides = [], [], [], []
     while world.steps < max_steps and not world.reached_goal:
         before = world.collisions
         world.step()
@@ -84,8 +93,15 @@ def record_run(controller, maze, start=(0.0, 0.0), heading=0.0, max_steps=None, 
         speeds.append(vehicle.velocity)
         collided.append(world.collisions > before)
         sensors.append((vehicle.left_distance, vehicle.front_distance, vehicle.right_distance))
+        h = vehicle.orientation
+        centre = (vehicle.x_pos, vehicle.y_pos)
+        sides.append((
+            maze.raycast(centre, (-math.sin(h), math.cos(h)), vehicle.sensor_range) - vehicle.radius,
+            maze.raycast(centre, (math.sin(h), -math.cos(h)), vehicle.sensor_range) - vehicle.radius,
+        ))
     return RunRecord(maze, world.position_history, headings, speeds, collided, sensors,
-                     world.reached_goal, vehicle.sensor_range, vehicle.vel_gain, vehicle.radius)
+                     world.reached_goal, vehicle.sensor_range, vehicle.vel_gain, vehicle.radius,
+                     side_clearances=sides)
 
 
 def _reachable_cells(maze, start, radius, cell_size):
@@ -120,7 +136,7 @@ def _cell(position, maze, cell_size):
     return (int((position[0] - maze.x_min) // cell_size), int((position[1] - maze.y_min) // cell_size))
 
 
-def run_metrics(record, cell_size=EXPLORATION_CELL_SIZE):
+def run_metrics(record, cell_size=EXPLORATION_CELL_SIZE, close_distance=WALL_SIDE_CLOSE_DISTANCE):
     """Return the behavior and performance measures of one ``RunRecord``."""
     steps = record.steps
     if steps == 0:
@@ -132,6 +148,11 @@ def run_metrics(record, cell_size=EXPLORATION_CELL_SIZE):
         turns = (turns + np.pi) % (2 * np.pi) - np.pi
         total = float(np.sum(np.abs(turns)))
         bias = float(np.sum(turns) / total) if total > 0 else 0.0
+
+    left_close = record.side_clearances[:, 0] < close_distance
+    right_close = record.side_clearances[:, 1] < close_distance
+    one_sided = left_close ^ right_close
+    wall_side = float(np.mean(left_close[one_sided])) if one_sided.any() else float("nan")
 
     reachable = _reachable_cells(record.maze, tuple(record.positions[0]), record.radius, cell_size)
     visited = {_cell(p, record.maze, cell_size) for p in record.positions}
@@ -149,11 +170,17 @@ def run_metrics(record, cell_size=EXPLORATION_CELL_SIZE):
         "wall_clearance": clearance,
         "turning_bias": bias,
         "exploration": float(exploration),
+        "wall_side": wall_side,
         "goal_reached": float(record.reached_goal),
         "path_progress": float(progress),
         "steps": float(steps),
         "pct_steps_in_collision": 100.0 * float(np.mean(record.collided)) if steps else 0.0,
     }
+
+
+def _nan_stat(function, values):
+    values = np.asarray(values, dtype=float)
+    return float(function(values)) if np.isfinite(values).any() else float("nan")
 
 
 def random_maze_episodes(count, seed, maze_options=None, noise_seed_base=0):
@@ -168,7 +195,9 @@ def measure_controller(controller, episodes, cell_size=EXPLORATION_CELL_SIZE, **
 
     ``episodes`` is a list of ``(maze, start, heading, noise_seed)`` (see
     ``random_maze_episodes``); ``run_options`` are passed to ``record_run``.
-    Returns ``{"mean": {...}, "std": {...}, "runs": [per-run dicts]}``.
+    Returns ``{"mean": {...}, "std": {...}, "runs": [per-run dicts]}``; runs
+    where a measure is NaN (``wall_side`` with no one-sided wall) are skipped
+    for that measure.
     """
     runs = [
         run_metrics(record_run(controller, maze, start, heading, noise_seed=noise_seed,
@@ -177,8 +206,8 @@ def measure_controller(controller, episodes, cell_size=EXPLORATION_CELL_SIZE, **
     ]
     names = BEHAVIOR_MEASURES + PERFORMANCE_MEASURES
     return {
-        "mean": {name: float(np.mean([run[name] for run in runs])) for name in names},
-        "std": {name: float(np.std([run[name] for run in runs])) for name in names},
+        "mean": {name: _nan_stat(np.nanmean, [run[name] for run in runs]) for name in names},
+        "std": {name: _nan_stat(np.nanstd, [run[name] for run in runs]) for name in names},
         "runs": runs,
     }
 

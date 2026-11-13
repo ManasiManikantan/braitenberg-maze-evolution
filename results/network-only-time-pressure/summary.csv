@@ -1,0 +1,16 @@
+condition,step_limits,course,runs,goal_success,mean_path_progress,mean_best_path_progress,pct_steps_in_collision,longest_pinned_mean,longest_pinned_max,mean_path_length
+no_time_pressure,3000 every course,1,25,0.56,0.158,0.622,61.8,610.9,2577,39.84
+no_time_pressure,3000 every course,2,25,0.0,-0.741,0.137,72.1,1100.8,2702,44.96
+no_time_pressure,3000 every course,3,25,0.16,-0.009,0.485,24.8,185.2,475,112.01
+no_time_pressure,3000 every course,4,25,0.84,0.873,0.908,55.8,442.5,2457,42.33
+no_time_pressure,3000 every course,all,100,0.39,0.07,0.538,53.0,584.9,2702,59.78
+no_time_pressure_controllers_at_limits,600/600/740/600,1,25,0.04,-0.049,0.252,50.3,180.4,556,15.83
+no_time_pressure_controllers_at_limits,600/600/740/600,2,25,0.0,-0.316,0.041,64.6,287.5,561,11.72
+no_time_pressure_controllers_at_limits,600/600/740/600,3,25,0.0,-0.139,0.354,30.9,122.0,375,27.04
+no_time_pressure_controllers_at_limits,600/600/740/600,4,25,0.12,0.16,0.371,44.8,156.1,441,17.43
+no_time_pressure_controllers_at_limits,600/600/740/600,all,100,0.04,-0.086,0.254,46.7,186.5,561,18.01
+time_pressure,600/600/740/600,1,25,0.8,0.851,0.871,24.6,94.6,555,19.94
+time_pressure,600/600/740/600,2,25,0.0,0.014,0.149,50.9,187.9,555,15.63
+time_pressure,600/600/740/600,3,25,0.0,0.161,0.352,30.7,182.8,673,27.91
+time_pressure,600/600/740/600,4,25,0.48,0.681,0.746,24.9,94.8,516,21.33
+time_pressure,600/600/740/600,all,100,0.32,0.427,0.529,33.3,140.0,673,21.2

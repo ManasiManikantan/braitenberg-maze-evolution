@@ -247,7 +247,8 @@ class CollisionAvoidanceTests(unittest.TestCase):
             goal=(8.0, -7.0),
             goal_radius=1.0,
         )
-        vehicle = Vehicle(noise_stdev=0)
+        # Original parallel-ray layout.
+        vehicle = Vehicle(noise_stdev=0, side_sensor_angle=0.0)
 
         vehicle.sense(maze)
 
@@ -256,6 +257,32 @@ class CollisionAvoidanceTests(unittest.TestCase):
         self.assertAlmostEqual(vehicle.right_distance, 4.0)
         self.assertLess(vehicle.front_distance, vehicle.left_distance)
         self.assertLess(vehicle.front_distance, vehicle.right_distance)
+
+    def test_default_side_sensors_look_out_at_sixty_degrees(self):
+        maze = Maze(
+            walls=[((4.0, -9.0), (4.0, 9.0))],
+            obstacles=[],
+            goal=(8.0, -7.0),
+            goal_radius=1.0,
+        )
+        vehicle = Vehicle(noise_stdev=0)
+        self.assertAlmostEqual(vehicle.side_sensor_angle, math.radians(60))
+
+        vehicle.sense(maze)
+
+        self.assertAlmostEqual(vehicle.front_distance, 3.0)
+        # side rays start at (0, +/-1) and travel 4 / cos(60 deg) = 8 to reach x = 4
+        self.assertAlmostEqual(vehicle.left_distance, 8.0)
+        self.assertAlmostEqual(vehicle.right_distance, 8.0)
+
+        side_wall = Maze(walls=[((-5.0, 3.0), (5.0, 3.0))], obstacles=[],
+                         goal=(8.0, -7.0), goal_radius=1.0)
+        vehicle.sense(side_wall)
+        # wall 2 units beside the left edge: 2 / sin(60 deg); the right ray sees nothing
+        # in range and the front ray only reaches the outer boundary at x = 10
+        self.assertAlmostEqual(vehicle.left_distance, 2.0 / math.sin(math.radians(60)))
+        self.assertEqual(vehicle.right_distance, vehicle.sensor_range)
+        self.assertAlmostEqual(vehicle.front_distance, 9.0)
 
     def test_forward_half_scan_prefers_wide_body_clearance(self):
         vehicle = Vehicle(noise_stdev=0)

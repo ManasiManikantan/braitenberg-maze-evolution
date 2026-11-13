@@ -21,6 +21,9 @@ DEFAULT_ROBOT_NOISE = {
 }
 
 
+DEFAULT_SIDE_SENSOR_ANGLE = np.deg2rad(60.0)
+
+
 def euclidean_distance(point1, point2):
     """Return the Euclidean distance between two Point objects."""
     return np.sqrt((point1.x_pos - point2.x_pos)**2 + (point1.y_pos - point2.y_pos)**2)
@@ -35,13 +38,19 @@ class Point:
 
 
 class Vehicle(Point):
-    """A differential-drive vehicle with two forward-facing distance sensors.
+    """A differential-drive vehicle with three distance sensors.
 
-    The vehicle body is modelled as a circle. Two distance sensors are mounted
-    at the front of the body and angled symmetrically around its heading.
+    The vehicle body is modelled as a circle. The front sensor sits at the
+    front of the body and looks straight ahead. The left and right sensors
+    sit on the body's left and right edges and look outward at
+    ``side_sensor_angle`` from the heading (0 makes all three rays parallel,
+    the original layout).
 
     Args:
-        angle_offset: Legacy argument retained for constructor compatibility.
+        angle_offset: Legacy argument retained for constructor compatibility
+                      (unused; see ``side_sensor_angle``).
+        side_sensor_angle: Angle (radians) between the heading and each side
+                      ray, from 0 (parallel) to pi/2. Default 60 degrees.
         turn_gain:    How strongly the sensor difference steers the vehicle.
                       Larger values produce sharper turns.
         noise_stdev:  Standard deviation of Gaussian noise added to the
@@ -82,7 +91,8 @@ class Vehicle(Point):
                  goal_seek_distance=4.0, wall_avoidance_distance=0.25,
                  navigation_heuristics=True, noise_seed=None,
                  sensor_noise_stdev=0.0, motor_noise_stdev=0.0, motor_mismatch=0.0,
-                 start_position_stdev=0.0, start_heading_stdev=0.0):
+                 start_position_stdev=0.0, start_heading_stdev=0.0,
+                 side_sensor_angle=DEFAULT_SIDE_SENSOR_ANGLE):
         super().__init__()
         # Every Vehicle starts at the origin facing along +x, optionally
         # jittered by start_position_stdev / start_heading_stdev below.
@@ -125,6 +135,9 @@ class Vehicle(Point):
             raise ValueError("noise standard deviations must be non-negative")
         if not -1 < motor_mismatch < 1:
             raise ValueError("motor_mismatch must be in (-1, 1)")
+        if not 0 <= side_sensor_angle <= np.pi / 2:
+            raise ValueError("side_sensor_angle must be between 0 and pi/2 radians")
+        self.side_sensor_angle = float(side_sensor_angle)
         self.sensor_noise_stdev = sensor_noise_stdev
         self.motor_noise_stdev = motor_noise_stdev
         self.motor_mismatch = motor_mismatch
@@ -204,6 +217,14 @@ class Vehicle(Point):
         self.y_pos += self.velocity * np.sin(self.orientation)
         self.update_sensor_pos()
 
+    def sensor_angles(self):
+        """Return world-frame ray angles for the left, front, and right sensors."""
+        return (
+            self.orientation + self.side_sensor_angle,
+            self.orientation,
+            self.orientation - self.side_sensor_angle,
+        )
+
     def sense(self, maze, goal=None):
         """Read obstacle proximity and check whether the goal is visible.
 
@@ -214,20 +235,20 @@ class Vehicle(Point):
         Args:
             maze: Maze providing a ``raycast`` method.
         """
-        ray_direction = (np.cos(self.orientation), np.sin(self.orientation))
+        left_angle, front_angle, right_angle = self.sensor_angles()
         self.left_distance, self.left_hit_type = maze.raycast_with_type(
             self.ls,
-            ray_direction,
+            (np.cos(left_angle), np.sin(left_angle)),
             self.sensor_range,
         )
         self.front_distance, self.front_hit_type = maze.raycast_with_type(
             self.fs,
-            ray_direction,
+            (np.cos(front_angle), np.sin(front_angle)),
             self.sensor_range,
         )
         self.right_distance, self.right_hit_type = maze.raycast_with_type(
             self.rs,
-            ray_direction,
+            (np.cos(right_angle), np.sin(right_angle)),
             self.sensor_range,
         )
         if self.sensor_noise_stdev > 0:

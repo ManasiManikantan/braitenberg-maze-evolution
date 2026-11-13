@@ -1,0 +1,14 @@
+seed 0: 300 random mazes original 0.667, mirrored 0.660, difference +0.007 (paired SE 0.033)
+seed 1: 300 random mazes original 0.603, mirrored 0.607, difference -0.003 (paired SE 0.039)
+seed 2: 300 random mazes original 0.730, mirrored 0.750, difference -0.020 (paired SE 0.032)
+seed 3: 300 random mazes original 0.590, mirrored 0.650, difference -0.060 (paired SE 0.031)
+seed 4: 300 random mazes original 0.653, mirrored 0.647, difference +0.007 (paired SE 0.038)
+all seeds: original 0.649, mirrored 0.663, difference -0.014 +/- 0.016 (paired SE)
+seed 1 original course_A: 0/50
+seed 1 original course_B: 40/50
+seed 1 mirrored course_A: 43/50
+seed 1 mirrored course_B: 0/50
+seed 2 original course_A: 0/50
+seed 2 original course_B: 50/50
+seed 2 mirrored course_A: 50/50
+seed 2 mirrored course_B: 0/50

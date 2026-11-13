@@ -1,0 +1,17 @@
+controller,test_set,runs,goal_success_pct,mean_path_progress,pct_steps_in_collision
+evolved,random_12x12,250,66.8,0.741,37.1
+evolved,course_A,50,14.0,0.535,36.4
+evolved,course_B,50,52.0,0.737,47.2
+evolved,course_C,50,100.0,1.0,30.3
+untrained,random_12x12,250,3.6,0.099,40.2
+untrained,course_A,50,6.0,0.169,56.1
+untrained,course_B,50,0.0,0.099,54.3
+untrained,course_C,50,22.0,0.214,58.2
+left_wall,random_12x12,50,74.0,,9.5
+left_wall,course_A,10,100.0,,0.0
+left_wall,course_B,10,30.0,,50.9
+left_wall,course_C,10,20.0,,66.2
+right_wall,random_12x12,50,68.0,,15.7
+right_wall,course_A,10,30.0,,39.5
+right_wall,course_B,10,100.0,,0.1
+right_wall,course_C,10,50.0,,41.0

@@ -107,10 +107,11 @@ def animate_world(world=None, steps=1000, interval=40, show=True):
         )
         heading.set_positions((vehicle.x_pos, vehicle.y_pos), heading_end)
 
+        left_angle, front_angle, right_angle = vehicle.sensor_angles()
         sensor_rays = (
-            (left_ray, vehicle.ls, vehicle.left_distance, vehicle.orientation),
-            (front_ray, vehicle.fs, vehicle.front_distance, vehicle.orientation),
-            (right_ray, vehicle.rs, vehicle.right_distance, vehicle.orientation),
+            (left_ray, vehicle.ls, vehicle.left_distance, left_angle),
+            (front_ray, vehicle.fs, vehicle.front_distance, front_angle),
+            (right_ray, vehicle.rs, vehicle.right_distance, right_angle),
         )
         for ray, sensor, distance, angle in sensor_rays:
             ray.set_data(

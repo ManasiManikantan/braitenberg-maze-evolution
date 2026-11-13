@@ -1,0 +1,6 @@
+seed,turn_bias_R_minus_L,bias_direction,dL/dlightL,dL/dlightR,dR/dlightL,dR/dlightR,wiring,classic_label,turns,turn_strength,speed_in_light,behaves_like,share_of_states_lit,goals_A,goals_B
+0,0.147,left,0.036,1.746,0.024,-0.014,crossed excitatory,aggression (2b),toward light,1.748,faster,aggression-like,0.43,5,7
+1,0.028,left,-0.146,0.086,0.19,0.026,crossed excitatory,aggression (2b),toward light,0.396,faster,aggression-like,0.44,0,9
+2,0.007,left,-0.048,0.259,0.709,0.167,crossed excitatory,aggression (2b),toward light,0.849,faster,aggression-like,0.49,8,4
+3,0.086,left,0.038,0.474,0.004,0.003,crossed excitatory,aggression (2b),toward light,0.437,faster,aggression-like,0.54,10,0
+4,-0.739,right,-0.001,-0.0,0.889,0.176,crossed excitatory,aggression (2b),toward light,0.713,faster,aggression-like,0.36,0,9

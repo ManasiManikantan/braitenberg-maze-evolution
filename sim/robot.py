@@ -9,6 +9,25 @@ Defines the core building blocks for a maze-navigation robot:
 
 import numpy as np
 
+# Modest robot-realism noise used by default when evolving controllers.
+# Vehicle itself defaults every source to off so rule-based tests and other
+# callers keep their exact behavior.
+DEFAULT_ROBOT_NOISE = {
+    "sensor_noise_stdev": 0.2,      # 2% of the default 10-unit sensor range
+    "motor_noise_stdev": 0.05,      # per wheel, per step, in motor-command units
+    "motor_mismatch": 0.05,         # 5% gain difference between the wheels...
+    "randomize_mismatch_side": True,  # ...with a random stronger wheel per run
+    "start_position_stdev": 0.2,    # maze units, clipped to +/-0.4
+    "start_heading_stdev": 0.1,     # radians (~6 degrees), clipped to +/-0.2
+    "light_noise_stdev": 0.02,      # light intensity units (0-1 scale), like 2% sensor noise
+}
+
+
+DEFAULT_SIDE_SENSOR_ANGLE = np.deg2rad(60.0)
+DEFAULT_LIGHT_SENSOR_ANGLE = np.deg2rad(45.0)
+DEFAULT_LIGHT_FALLOFF_DISTANCE = 5.0
+LIGHT_OCCLUSION_MODES = ("blocked", "through")
+
 
 def euclidean_distance(point1, point2):
     """Return the Euclidean distance between two Point objects."""
@@ -24,13 +43,32 @@ class Point:
 
 
 class Vehicle(Point):
-    """A differential-drive vehicle with two forward-facing distance sensors.
+    """A differential-drive vehicle with three distance sensors.
 
-    The vehicle body is modelled as a circle. Two distance sensors are mounted
-    at the front of the body and angled symmetrically around its heading.
+    The vehicle body is modelled as a circle. The front sensor sits at the
+    front of the body and looks straight ahead. The left and right sensors
+    sit on the body's left and right edges and look outward at
+    ``side_sensor_angle`` from the heading (0 makes all three rays parallel,
+    the original layout).
 
     Args:
-        angle_offset: Legacy argument retained for constructor compatibility.
+        angle_offset: Legacy argument retained for constructor compatibility
+                      (unused; see ``side_sensor_angle``).
+        side_sensor_angle: Angle (radians) between the heading and each side
+                      ray, from 0 (parallel) to pi/2. Default 60 degrees.
+        start_position: Starting (x, y) of the body centre. Default origin.
+        start_heading: Starting heading in radians. Default 0 (+x).
+        light_occlusion: None (default, no light sensors), "blocked" (walls
+                      block the light from the goal), or "through" (walls do
+                      not). When set, the controller receives five inputs:
+                      left, front, right distance, then left and right light.
+        light_sensor_angle: Angle (radians) of each light sensor from the
+                      heading; sensors sit on the body edge at +/- this angle
+                      and face outward along it. Default 45 degrees.
+        light_falloff_distance: Distance at which intensity halves before
+                      the angular factor: I = max(0, cos a) / (1 + (d / d0)^2).
+        light_noise_stdev: Gaussian noise added to each light reading (then
+                      clipped to [0, 1]). Zero disables it.
         turn_gain:    How strongly the sensor difference steers the vehicle.
                       Larger values produce sharper turns.
         noise_stdev:  Standard deviation of Gaussian noise added to the
@@ -47,6 +85,23 @@ class Vehicle(Point):
         wiring:       Sensor-to-motor mapping: "crossed" (default) or "direct".
         controller:   Optional controller with a two-input, two-output API.
         distance:     Legacy alias for sensor_range.
+        sensor_noise_stdev: Gaussian noise (maze units) added to each ray
+                      distance reading every step. Zero disables it.
+        motor_noise_stdev: Gaussian noise added independently to each wheel's
+                      motor command every step. Zero disables it.
+        motor_mismatch: Fixed fractional gain difference between the wheels:
+                      left gain is 1 + m/2 and right gain is 1 - m/2.
+        randomize_mismatch_side: If True, the sign of ``motor_mismatch`` is
+                      drawn at random (from the noise seed) when the vehicle is
+                      created, so either wheel may be the stronger one.
+        start_position_stdev: Gaussian jitter (maze units) of the start x and y,
+                      clipped to two standard deviations.
+        start_heading_stdev: Gaussian jitter (radians) of the start heading,
+                      clipped to two standard deviations.
+
+    All noise sources default to off; ``DEFAULT_ROBOT_NOISE`` holds the
+    modest levels used by default for evolution. Disabled sources draw no
+    random numbers, so seeded runs without them are unchanged.
     """
 
     def __init__(self, angle_offset=np.pi/6, turn_gain=0.1, noise_stdev=0.1,
@@ -55,11 +110,19 @@ class Vehicle(Point):
                  reverse_speed=0.75,
                  avoidance_gain=1.5, cruise_speed=0.5, turn_speed=0.75,
                  goal_seek_distance=4.0, wall_avoidance_distance=0.25,
-                 navigation_heuristics=True, noise_seed=None):
-        super().__init__()
-        # Every Vehicle starts at the origin facing along +x. The only thing
-        # that varies between repetitions is the random noise.
-        self.orientation = 0.0          # heading angle (radians); starts pointing along +x
+                 navigation_heuristics=True, noise_seed=None,
+                 sensor_noise_stdev=0.0, motor_noise_stdev=0.0, motor_mismatch=0.0,
+                 start_position_stdev=0.0, start_heading_stdev=0.0,
+                 side_sensor_angle=DEFAULT_SIDE_SENSOR_ANGLE,
+                 start_position=(0.0, 0.0), start_heading=0.0,
+                 light_occlusion=None, light_sensor_angle=DEFAULT_LIGHT_SENSOR_ANGLE,
+                 light_falloff_distance=DEFAULT_LIGHT_FALLOFF_DISTANCE, light_noise_stdev=0.0,
+                 randomize_mismatch_side=False):
+        super().__init__(float(start_position[0]), float(start_position[1]))
+        # The vehicle starts at start_position facing start_heading (default:
+        # the origin, facing +x), optionally jittered by start_position_stdev /
+        # start_heading_stdev below.
+        self.orientation = float(start_heading)  # heading angle (radians)
         self.velocity = 0.0             # forward speed (arbitrary units)
         self.radius = 1.0               # body radius; also the sensor arm length
 
@@ -93,6 +156,29 @@ class Vehicle(Point):
             raise ValueError("turn_speed must be in (0, 1]")
         if goal_seek_distance <= 0:
             raise ValueError("goal_seek_distance must be positive")
+        if min(sensor_noise_stdev, motor_noise_stdev,
+               start_position_stdev, start_heading_stdev) < 0:
+            raise ValueError("noise standard deviations must be non-negative")
+        if not -1 < motor_mismatch < 1:
+            raise ValueError("motor_mismatch must be in (-1, 1)")
+        if not 0 <= side_sensor_angle <= np.pi / 2:
+            raise ValueError("side_sensor_angle must be between 0 and pi/2 radians")
+        self.side_sensor_angle = float(side_sensor_angle)
+        if light_occlusion is not None and light_occlusion not in LIGHT_OCCLUSION_MODES:
+            raise ValueError("light_occlusion must be None, 'blocked', or 'through'")
+        if not 0 <= light_sensor_angle <= np.pi / 2:
+            raise ValueError("light_sensor_angle must be between 0 and pi/2 radians")
+        if light_falloff_distance <= 0 or light_noise_stdev < 0:
+            raise ValueError("light_falloff_distance must be positive and light noise non-negative")
+        self.light_occlusion = light_occlusion
+        self.light_sensor_angle = float(light_sensor_angle)
+        self.light_falloff_distance = float(light_falloff_distance)
+        self.light_noise_stdev = light_noise_stdev
+        self.left_light = 0.0
+        self.right_light = 0.0
+        self.sensor_noise_stdev = sensor_noise_stdev
+        self.motor_noise_stdev = motor_noise_stdev
+        self.motor_mismatch = motor_mismatch
         self.sensor_range = sensor_range
         self.avoidance_distance = avoidance_distance
         self.wall_avoidance_distance = wall_avoidance_distance
@@ -105,6 +191,23 @@ class Vehicle(Point):
         self.goal_seek_distance = goal_seek_distance
         self.navigation_heuristics = navigation_heuristics
         self._noise_rng = np.random.default_rng(noise_seed)
+        if randomize_mismatch_side and self.motor_mismatch != 0:
+            if self._noise_rng.random() < 0.5:
+                self.motor_mismatch = -self.motor_mismatch
+        if start_position_stdev > 0:
+            offset_x, offset_y = map(float, np.clip(
+                self._noise_rng.normal(0.0, start_position_stdev, 2),
+                -2 * start_position_stdev,
+                2 * start_position_stdev,
+            ))
+            self.x_pos += offset_x
+            self.y_pos += offset_y
+        if start_heading_stdev > 0:
+            self.orientation += float(np.clip(
+                self._noise_rng.normal(0.0, start_heading_stdev),
+                -2 * start_heading_stdev,
+                2 * start_heading_stdev,
+            ))
         self.left_distance = sensor_range
         self.front_distance = sensor_range
         self.right_distance = sensor_range
@@ -157,6 +260,49 @@ class Vehicle(Point):
         self.y_pos += self.velocity * np.sin(self.orientation)
         self.update_sensor_pos()
 
+    def sensor_angles(self):
+        """Return world-frame ray angles for the left, front, and right sensors."""
+        return (
+            self.orientation + self.side_sensor_angle,
+            self.orientation,
+            self.orientation - self.side_sensor_angle,
+        )
+
+    def controller_inputs(self):
+        """Inputs passed to the controller: 3 distance readings, plus 2 light readings if enabled."""
+        inputs = (self.left_sensor, self.front_sensor, self.right_sensor)
+        if self.light_occlusion is not None:
+            inputs += (self.left_light, self.right_light)
+        return inputs
+
+    def light_sensor_poses(self):
+        """Return ((x, y, facing_angle) for the left light sensor, same for the right)."""
+        poses = []
+        for side in (1, -1):
+            angle = self.orientation + side * self.light_sensor_angle
+            poses.append((self.x_pos + self.radius * np.cos(angle),
+                          self.y_pos + self.radius * np.sin(angle), angle))
+        return poses
+
+    def _sense_light(self, maze, goal):
+        goal_x, goal_y = (goal.x_pos, goal.y_pos) if hasattr(goal, "x_pos") else goal
+        readings = []
+        for sensor_x, sensor_y, facing in self.light_sensor_poses():
+            dx, dy = goal_x - sensor_x, goal_y - sensor_y
+            distance = float(np.hypot(dx, dy))
+            if distance < 1e-9:
+                intensity = 1.0
+            else:
+                cosine = (dx * np.cos(facing) + dy * np.sin(facing)) / distance
+                intensity = max(0.0, cosine) / (1.0 + (distance / self.light_falloff_distance)**2)
+                if (self.light_occlusion == "blocked" and intensity > 0.0
+                        and maze.raycast((sensor_x, sensor_y), (dx, dy), distance) < distance - 1e-6):
+                    intensity = 0.0
+            readings.append(intensity)
+        if self.light_noise_stdev > 0:
+            readings = np.array(readings) + self._noise_rng.normal(0.0, self.light_noise_stdev, 2)
+        return tuple(float(np.clip(value, 0.0, 1.0)) for value in readings)
+
     def sense(self, maze, goal=None):
         """Read obstacle proximity and check whether the goal is visible.
 
@@ -167,25 +313,35 @@ class Vehicle(Point):
         Args:
             maze: Maze providing a ``raycast`` method.
         """
-        ray_direction = (np.cos(self.orientation), np.sin(self.orientation))
+        left_angle, front_angle, right_angle = self.sensor_angles()
         self.left_distance, self.left_hit_type = maze.raycast_with_type(
             self.ls,
-            ray_direction,
+            (np.cos(left_angle), np.sin(left_angle)),
             self.sensor_range,
         )
         self.front_distance, self.front_hit_type = maze.raycast_with_type(
             self.fs,
-            ray_direction,
+            (np.cos(front_angle), np.sin(front_angle)),
             self.sensor_range,
         )
         self.right_distance, self.right_hit_type = maze.raycast_with_type(
             self.rs,
-            ray_direction,
+            (np.cos(right_angle), np.sin(right_angle)),
             self.sensor_range,
         )
+        if self.sensor_noise_stdev > 0:
+            noisy = np.clip(
+                np.array([self.left_distance, self.front_distance, self.right_distance])
+                + self._noise_rng.normal(0.0, self.sensor_noise_stdev, 3),
+                0.0,
+                self.sensor_range,
+            )
+            self.left_distance, self.front_distance, self.right_distance = map(float, noisy)
         self.left_sensor = 1.0 - self.left_distance / self.sensor_range
         self.front_sensor = 1.0 - self.front_distance / self.sensor_range
         self.right_sensor = 1.0 - self.right_distance / self.sensor_range
+        if self.light_occlusion is not None and goal is not None:
+            self.left_light, self.right_light = self._sense_light(maze, goal)
         self.goal_visible = False
         self._goal_distance = np.inf
         if goal is not None:
@@ -216,13 +372,26 @@ class Vehicle(Point):
         return float(np.clip(1.0 - clearance / required_clearance, 0.0, 1.0))
 
     def think(self):
-        """Map sensors to motors, then apply a proximity-based safety override."""
+        """Map sensors to motors, then apply a proximity-based safety override.
+
+        ``left_motor`` / ``right_motor`` are the physical left and right wheels:
+        ``move`` turns the robot left when the right wheel is faster. The
+        hand-coded heuristics below were written for the earlier swapped
+        convention, so their outputs are swapped once here to keep their
+        behavior unchanged. Without heuristics the controller (or Braitenberg
+        wiring) output is used as is.
+        """
+        if self._think():
+            self.left_motor, self.right_motor = self.right_motor, self.left_motor
+
+    def _think(self):
+        """Set the motors; return True when they use the legacy swapped labels."""
         left_clearance = max(0.0, self.left_distance - self.radius)
         front_clearance = self.front_distance
         right_clearance = max(0.0, self.right_distance - self.radius)
         if self.navigation_heuristics and self._reverse_steps_remaining > 0:
             self.left_motor = self.right_motor = -self.reverse_speed
-            return
+            return True
 
         if (
             self.navigation_heuristics
@@ -251,7 +420,7 @@ class Vehicle(Point):
                 -1.0,
                 1.0,
             ))
-            return
+            return True
 
         if self.navigation_heuristics and self._aligning_to_opening:
             heading_error = np.arctan2(
@@ -262,7 +431,7 @@ class Vehicle(Point):
                 turn_direction = 1 if heading_error > 0 else -1
                 self.left_motor = self.turn_speed * turn_direction
                 self.right_motor = -self.turn_speed * turn_direction
-                return
+                return True
             self._aligning_to_opening = False
 
         if self.navigation_heuristics and self._turning_to_clear:
@@ -282,7 +451,7 @@ class Vehicle(Point):
                         )
                     self.left_motor = turn_magnitude * turn_direction
                     self.right_motor = -turn_magnitude * turn_direction
-                    return
+                    return True
                 self._scan_phase = "sweep"
                 self._scan_rotation = 0.0
                 self._turn_direction = 1
@@ -294,16 +463,16 @@ class Vehicle(Point):
                 if self._scan_best_distance <= 0.0:
                     self.reverse()
                     self.left_motor = self.right_motor = -self.reverse_speed
-                    return
+                    return True
                 self._opening_heading = self._scan_best_heading
                 self._aligning_to_opening = True
-                return self.think()
+                return self._think()
             turn_magnitude = self.turn_speed
             if self.turn_gain > 0:
                 turn_magnitude = min(turn_magnitude, remaining_rotation / (2 * self.turn_gain))
             self.left_motor = turn_magnitude * self._turn_direction
             self.right_motor = -turn_magnitude * self._turn_direction
-            return
+            return True
 
         both_rays_blocked = (
             left_clearance <= self._required_clearance(self.left_hit_type)
@@ -319,12 +488,10 @@ class Vehicle(Point):
             self._record_scan_opening()
             self.left_motor = self.turn_speed * self._turn_direction
             self.right_motor = -self.turn_speed * self._turn_direction
-            return
+            return True
 
         if self.controller is not None:
-            left_motor, right_motor = self.controller.forward(
-                (self.left_sensor, self.front_sensor, self.right_sensor)
-            )
+            left_motor, right_motor = self.controller.forward(self.controller_inputs())
         elif self.wiring == "crossed":
             left_motor = self.right_sensor
             right_motor = self.left_sensor
@@ -337,7 +504,7 @@ class Vehicle(Point):
         if not self.navigation_heuristics:
             self.left_motor = float(np.clip(left_motor, -1.0, 1.0))
             self.right_motor = float(np.clip(right_motor, -1.0, 1.0))
-            return
+            return False
 
         left_hazard = self._hazard(left_clearance, self.left_hit_type)
         right_hazard = self._hazard(right_clearance, self.right_hit_type)
@@ -353,7 +520,7 @@ class Vehicle(Point):
             ))
             self.left_motor = float(np.clip(base_speed + opening_turn, -1.0, 1.0))
             self.right_motor = float(np.clip(base_speed - opening_turn, -1.0, 1.0))
-            return
+            return True
 
         if max(left_hazard, front_hazard, right_hazard) == 0.0:
             left_motor = max(float(left_motor), self.cruise_speed)
@@ -364,7 +531,7 @@ class Vehicle(Point):
         self.right_motor = float(np.clip(
             right_motor - self.avoidance_gain * max(right_hazard, front_hazard), -1.0, 1.0
         ))
-
+        return True
 
     def _begin_avoidance_turn(self):
         self._turning_to_clear = True
@@ -409,7 +576,8 @@ class Vehicle(Point):
         """Update orientation and velocity, then advance the body position.
 
         Differential drive kinematics:
-          - Turning rate  = turn_gain × (left_motor − right_motor) + noise
+          - Turning rate  = turn_gain × (right_motor − left_motor) + noise
+            (a faster right wheel turns the robot left, like a real robot)
           - Forward speed = vel_gain  × average(left_motor, right_motor)
 
         Adding noise to the orientation simulates imperfect actuators and
@@ -419,8 +587,14 @@ class Vehicle(Point):
         was_scanning = self._turning_to_clear
         old_orientation = self.orientation
         noise = self._noise_rng.normal(0, self.noise_stdev)
-        self.orientation += self.turn_gain * (self.left_motor - self.right_motor) + noise
-        self.velocity = self.vel_gain * ((self.right_motor + self.left_motor) / 2)
+        left_wheel = self.left_motor * (1 + self.motor_mismatch / 2)
+        right_wheel = self.right_motor * (1 - self.motor_mismatch / 2)
+        if self.motor_noise_stdev > 0:
+            left_noise, right_noise = self._noise_rng.normal(0.0, self.motor_noise_stdev, 2)
+            left_wheel += left_noise
+            right_wheel += right_noise
+        self.orientation += self.turn_gain * (right_wheel - left_wheel) + noise
+        self.velocity = self.vel_gain * ((right_wheel + left_wheel) / 2)
         old_position = (self.x_pos, self.y_pos)
         self.update_body_pos()
         collided = maze is not None and maze.collides(

@@ -2,11 +2,12 @@
 
 import argparse
 import csv
+import math
 from pathlib import Path
 
 import numpy as np
 
-from evolution.fitness import evaluate_fitness, evaluate_outcome_fitness
+from evolution.fitness import evaluate_fitness, evaluate_outcome_fitness, path_distances
 from evolution.genetic_algorithm import GeneticAlgorithm
 from sim.maze import Maze
 from sim.robot import DEFAULT_ROBOT_NOISE, Vehicle
@@ -22,6 +23,12 @@ TRAINING_NOISE_SEED_BASE = 900000
 SUCCESS_BONUS = 100.0
 SPEED_BONUS = 50.0
 COLLISION_SCORE_FLOOR = -100.0
+# Per-course time limit = factor * shortest-path length / reference speed.
+# 0.05 maze units/step is ~75% of top speed (1/15); evolved network-only
+# controllers averaged 0.052 on steps when they were not blocked by a wall.
+# A factor of 0 (or None) disables per-course limits ("no time pressure").
+DEFAULT_TIME_LIMIT_FACTOR = 2.0
+DEFAULT_REFERENCE_SPEED = 0.05
 HISTORY_FIELDS = (
     "training_seed",
     "generation",
@@ -48,16 +55,40 @@ RESULT_FIELDS = (
 )
 
 
+def course_step_limit(maze, time_limit_factor=DEFAULT_TIME_LIMIT_FACTOR,
+                      reference_speed=DEFAULT_REFERENCE_SPEED, radius=1.0, start=(0.0, 0.0)):
+    """Return a course's step limit, or None when per-course limits are off.
+
+    The limit is ``time_limit_factor`` times the steps needed to drive the
+    shortest robot-sized path from ``start`` to the goal at
+    ``reference_speed`` maze units per step.
+    """
+    if not time_limit_factor:
+        return None
+    if time_limit_factor < 0 or reference_speed <= 0:
+        raise ValueError("time_limit_factor must be >= 0 and reference_speed positive")
+    distance = float(path_distances(maze, [start], radius)[0])
+    return int(math.ceil(time_limit_factor * distance / reference_speed))
+
+
+def _episode_steps(steps, limit):
+    return steps if limit is None else min(steps, limit)
+
+
 class MultiCourseWorld:
     """Run one controller on each training course and expose mean fitness.
 
     ``network_only=True`` (the default) disables the hand-coded navigation
     heuristics so the controller alone drives the robot. ``robot_noise``
     defaults to ``DEFAULT_ROBOT_NOISE``; pass ``{}`` to disable it.
+    Each course runs for at most ``course_step_limit`` steps (see
+    ``time_limit_factor`` / ``reference_speed``), capped by ``run(steps)``.
     """
 
     def __init__(self, controller, noise_stdev=0.0, noise_seed_base=TRAINING_NOISE_SEED_BASE,
-                 network_only=True, robot_noise=None):
+                 network_only=True, robot_noise=None,
+                 time_limit_factor=DEFAULT_TIME_LIMIT_FACTOR,
+                 reference_speed=DEFAULT_REFERENCE_SPEED):
         robot_noise = DEFAULT_ROBOT_NOISE if robot_noise is None else robot_noise
         self.worlds = [
             (
@@ -75,11 +106,15 @@ class MultiCourseWorld:
             )
             for difficulty in TRAINING_COURSES
         ]
+        self.step_limits = [
+            course_step_limit(world.maze, time_limit_factor, reference_speed)
+            for _, world in self.worlds
+        ]
 
     def run(self, steps):
         self.steps = steps
-        for _, world in self.worlds:
-            world.run(steps)
+        for (_, world), limit in zip(self.worlds, self.step_limits):
+            world.run(_episode_steps(steps, limit))
 
 
 def _training_score(result, world, steps):
@@ -184,11 +219,14 @@ def evaluate_controller(
     steps,
     noise_stdev,
     robot_noise=None,
+    time_limit_factor=DEFAULT_TIME_LIMIT_FACTOR,
+    reference_speed=DEFAULT_REFERENCE_SPEED,
 ):
     """Evaluate one controller on every course with reproducible noise.
 
-    ``robot_noise`` (default ``DEFAULT_ROBOT_NOISE``) applies to every
-    controller and mode so comparisons share the same conditions.
+    ``robot_noise`` (default ``DEFAULT_ROBOT_NOISE``) and the per-course step
+    limits apply to every controller and mode so comparisons share the same
+    conditions.
     """
     robot_noise = DEFAULT_ROBOT_NOISE if robot_noise is None else robot_noise
     use_heuristics = behavior_mode == "full"
@@ -203,7 +241,9 @@ def evaluate_controller(
             **robot_noise,
         )
         world = World(maze=maze, vehicle=vehicle)
-        world.run(steps)
+        world.run(_episode_steps(
+            steps, course_step_limit(maze, time_limit_factor, reference_speed)
+        ))
         metrics = evaluate_fitness(world)
         records.append({
             "training_seed": training_seed,
@@ -288,8 +328,11 @@ def run_experiment(
     history_path="experiment_training_history.csv",
     network_only=True,
     robot_noise=None,
+    time_limit_factor=DEFAULT_TIME_LIMIT_FACTOR,
+    reference_speed=DEFAULT_REFERENCE_SPEED,
 ):
     robot_noise = DEFAULT_ROBOT_NOISE if robot_noise is None else robot_noise
+    time_limits = {"time_limit_factor": time_limit_factor, "reference_speed": reference_speed}
     courses = make_evaluation_courses()
     records = []
     genomes = {}
@@ -325,6 +368,7 @@ def run_experiment(
             steps,
             noise_stdev,
             robot_noise,
+            **time_limits,
         )
         records.extend(baseline)
         write_results(output_path, records)
@@ -346,6 +390,7 @@ def run_experiment(
                 noise_seed_base=int(training_noise_rng.integers(2**31)),
                 network_only=network_only,
                 robot_noise=robot_noise,
+                **time_limits,
             ),
         )
         evolved_controller = algorithm.decode_genome(best.genome)
@@ -371,6 +416,7 @@ def run_experiment(
                 steps,
                 noise_stdev,
                 robot_noise,
+                **time_limits,
             ))
         write_results(output_path, records)
 
@@ -396,6 +442,11 @@ def main():
                              "(default: the network is the only controller)")
     parser.add_argument("--no-robot-noise", action="store_true",
                         help="disable sensor, motor, wheel-mismatch, and start-pose noise")
+    parser.add_argument("--time-limit-factor", type=float, default=DEFAULT_TIME_LIMIT_FACTOR,
+                        help="per-course step limit as a multiple of the shortest-path "
+                             "driving time at --reference-speed; 0 disables (default: 2)")
+    parser.add_argument("--reference-speed", type=float, default=DEFAULT_REFERENCE_SPEED,
+                        help="maze units per step used for per-course limits (default: 0.05)")
     arguments = parser.parse_args()
     if arguments.seeds < 1:
         parser.error("--seeds must be at least 1")
@@ -407,6 +458,10 @@ def main():
         parser.error("--steps must be non-negative")
     if arguments.noise_stdev < 0:
         parser.error("--noise-stdev must be non-negative")
+    if arguments.time_limit_factor < 0:
+        parser.error("--time-limit-factor must be non-negative")
+    if arguments.reference_speed <= 0:
+        parser.error("--reference-speed must be positive")
     run_experiment(
         seeds=arguments.seeds,
         generations=arguments.generations,
@@ -418,6 +473,8 @@ def main():
         history_path=arguments.history_output,
         network_only=not arguments.with_heuristics,
         robot_noise={} if arguments.no_robot_noise else None,
+        time_limit_factor=arguments.time_limit_factor,
+        reference_speed=arguments.reference_speed,
     )
 
 

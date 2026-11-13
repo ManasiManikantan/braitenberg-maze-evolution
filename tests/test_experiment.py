@@ -3,6 +3,8 @@ import math
 
 from controller.network import NeuralNetwork
 from evolution.experiment import (
+    MultiCourseWorld,
+    course_step_limit,
     evaluate_controller,
     make_evaluation_courses,
 )
@@ -99,6 +101,43 @@ class ExperimentTests(unittest.TestCase):
         self.assertEqual(vehicles[0].orientation, vehicles[1].orientation)
         self.assertEqual(vehicles[0].x_pos, vehicles[1].x_pos)
         self.assertEqual(vehicles[0].y_pos, vehicles[1].y_pos)
+
+
+class StandStill:
+    def forward(self, sensors):
+        return (0.0, 0.0)
+
+
+class TimeLimitTests(unittest.TestCase):
+    def test_limit_is_factor_times_shortest_path_driving_time(self):
+        maze = Maze(difficulty=3)
+        self.assertEqual(course_step_limit(maze, 2.0, 0.05), 740)
+        self.assertEqual(course_step_limit(maze, 1.0, 0.05), 370)
+        self.assertEqual(course_step_limit(maze, 2.0, 0.1), 370)
+        self.assertIsNone(course_step_limit(maze, 0))
+        with self.assertRaises(ValueError):
+            course_step_limit(maze, 2.0, 0.0)
+
+    def test_training_worlds_stop_at_each_course_limit(self):
+        limited = MultiCourseWorld(StandStill())
+        limited.run(3000)
+        self.assertEqual([world.steps for _, world in limited.worlds], [600, 600, 740, 600])
+
+        unlimited = MultiCourseWorld(StandStill(), time_limit_factor=0)
+        unlimited.run(1000)
+        self.assertEqual([world.steps for _, world in unlimited.worlds], [1000] * 4)
+
+        capped = MultiCourseWorld(StandStill())
+        capped.run(500)
+        self.assertEqual([world.steps for _, world in capped.worlds], [500] * 4)
+
+    def test_evaluation_uses_per_course_limits(self):
+        courses = [("course_3", "training", Maze(difficulty=3))]
+        record, = evaluate_controller(StandStill(), "still", "neural_only", 0, courses, 3000, 0.0)
+        self.assertEqual(record["evaluation_steps"], 740)
+        record, = evaluate_controller(StandStill(), "still", "neural_only", 0, courses, 3000, 0.0,
+                                      time_limit_factor=0)
+        self.assertEqual(record["evaluation_steps"], 3000)
 
 
 if __name__ == "__main__":

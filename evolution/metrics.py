@@ -72,7 +72,7 @@ class RunRecord:
 
 def record_run(controller, maze, start=(0.0, 0.0), heading=0.0, max_steps=None, noise_seed=None,
                noise_stdev=DEFAULT_NOISE_STDEV, robot_noise=None, light_occlusion="blocked",
-               navigation_heuristics=False, on_step=None):
+               navigation_heuristics=False, on_step=None, world_options=None):
     """Run ``controller`` in ``maze`` and return a ``RunRecord``.
 
     ``max_steps`` defaults to the maze's ``course_step_limit`` from ``start``.
@@ -80,18 +80,19 @@ def record_run(controller, maze, start=(0.0, 0.0), heading=0.0, max_steps=None, 
     3-input controller; controllers that read only the first three inputs,
     like the wall followers, work with either). ``on_step(vehicle)``, if
     given, is called after every step (e.g. to log controller inputs). The
-    finished ``World`` is kept as ``record.world``.
+    finished ``World`` is kept as ``record.world``. ``world_options`` are
+    passed to ``World`` (e.g. ``{"health": 15}``).
     """
     robot_noise = DEFAULT_ROBOT_NOISE if robot_noise is None else robot_noise
     vehicle = Vehicle(controller=controller, noise_stdev=noise_stdev, noise_seed=noise_seed,
                       navigation_heuristics=navigation_heuristics, start_position=start,
                       start_heading=heading, light_occlusion=light_occlusion, **robot_noise)
-    world = World(maze=maze, vehicle=vehicle)
+    world = World(maze=maze, vehicle=vehicle, **(world_options or {}))
     if max_steps is None:
         max_steps = course_step_limit(maze, start=start)
     headings = [vehicle.orientation]
     speeds, collided, sensors, sides = [], [], [], []
-    while world.steps < max_steps and not world.reached_goal:
+    while world.steps < max_steps and not world.reached_goal and not world.dead:
         before = world.collisions
         world.step()
         headings.append(vehicle.orientation)

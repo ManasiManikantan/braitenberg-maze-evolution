@@ -69,6 +69,9 @@ class Vehicle(Point):
                       the angular factor: I = max(0, cos a) / (1 + (d / d0)^2).
         light_noise_stdev: Gaussian noise added to each light reading (then
                       clipped to [0, 1]). Zero disables it.
+        light_visible_distance: If set, a light sensor reads 0 when the goal is
+                      farther than this from it ("hidden light"). None
+                      (default) = visible at any distance.
         turn_gain:    How strongly the sensor difference steers the vehicle.
                       Larger values produce sharper turns.
         noise_stdev:  Standard deviation of Gaussian noise added to the
@@ -117,7 +120,7 @@ class Vehicle(Point):
                  start_position=(0.0, 0.0), start_heading=0.0,
                  light_occlusion=None, light_sensor_angle=DEFAULT_LIGHT_SENSOR_ANGLE,
                  light_falloff_distance=DEFAULT_LIGHT_FALLOFF_DISTANCE, light_noise_stdev=0.0,
-                 randomize_mismatch_side=False):
+                 randomize_mismatch_side=False, light_visible_distance=None):
         super().__init__(float(start_position[0]), float(start_position[1]))
         # The vehicle starts at start_position facing start_heading (default:
         # the origin, facing +x), optionally jittered by start_position_stdev /
@@ -174,6 +177,9 @@ class Vehicle(Point):
         self.light_sensor_angle = float(light_sensor_angle)
         self.light_falloff_distance = float(light_falloff_distance)
         self.light_noise_stdev = light_noise_stdev
+        if light_visible_distance is not None and light_visible_distance <= 0:
+            raise ValueError("light_visible_distance must be positive or None")
+        self.light_visible_distance = light_visible_distance
         self.left_light = 0.0
         self.right_light = 0.0
         self.sensor_noise_stdev = sensor_noise_stdev
@@ -292,6 +298,8 @@ class Vehicle(Point):
             distance = float(np.hypot(dx, dy))
             if distance < 1e-9:
                 intensity = 1.0
+            elif self.light_visible_distance is not None and distance > self.light_visible_distance:
+                intensity = 0.0
             else:
                 cosine = (dx * np.cos(facing) + dy * np.sin(facing)) / distance
                 intensity = max(0.0, cosine) / (1.0 + (distance / self.light_falloff_distance)**2)

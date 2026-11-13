@@ -11,7 +11,12 @@ class World:
 
 	def __init__(self, maze=None, vehicle=None, goal=None, goal_radius=None,
 			 goal_tolerance=None, revisit_cell_size=1.0, revisit_trigger=2,
-			 stagnation_limit=80, progress_tolerance=0.25):
+			 stagnation_limit=80, progress_tolerance=0.25, health=None, damage_per_hit=1.0):
+		"""``health`` (None = off) turns on "walls hurt": every new collision
+		(entering contact, not every step spent pinned against a wall) costs
+		``damage_per_hit``; at 0 the robot is ``dead`` and the run ends without
+		reaching the goal. ``contact_entries`` counts new collisions either way.
+		"""
 		self.maze = Maze() if maze is None else maze
 		self.vehicle = Vehicle() if vehicle is None else vehicle
 		self.goal = self.maze.goal if goal is None else self._coordinates(goal)
@@ -32,6 +37,15 @@ class World:
 			raise ValueError("stagnation_limit must be at least 1")
 		if progress_tolerance < 0:
 			raise ValueError("progress_tolerance must be non-negative")
+		if health is not None and health <= 0:
+			raise ValueError("health must be positive or None")
+		if damage_per_hit < 0:
+			raise ValueError("damage_per_hit must be non-negative")
+		self.health = health
+		self.damage_per_hit = damage_per_hit
+		self.dead = False
+		self.contact_entries = 0
+		self._in_contact = False
 		self.steps = 0
 		self.collisions = 0
 		self.moving_steps = 0
@@ -81,13 +95,20 @@ class World:
 
 	def step(self):
 		"""Advance the simulation by one sense-think-move cycle."""
-		if self.reached_goal:
+		if self.reached_goal or self.dead:
 			return self.vehicle
 		old_position = (self.vehicle.x_pos, self.vehicle.y_pos)
 		self.vehicle.sense(self.maze, self.goal)
 		self.vehicle.think()
-		if self.vehicle.move(self.maze):
+		collided = self.vehicle.move(self.maze)
+		if collided:
 			self.collisions += 1
+			if not self._in_contact:
+				self.contact_entries += 1
+				if self.health is not None:
+					self.health -= self.damage_per_hit
+					self.dead = self.health <= 0
+		self._in_contact = bool(collided)
 		new_position = (self.vehicle.x_pos, self.vehicle.y_pos)
 		if math.hypot(new_position[0] - old_position[0],
 					  new_position[1] - old_position[1]) > 1e-8:
@@ -114,7 +135,7 @@ class World:
 		if steps < 0:
 			raise ValueError("steps must be non-negative")
 		for _ in range(steps):
-			if self.reached_goal:
+			if self.reached_goal or self.dead:
 				break
 			self.step()
 		return self.vehicle

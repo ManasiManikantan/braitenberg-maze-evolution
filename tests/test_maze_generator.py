@@ -4,7 +4,13 @@ import unittest
 import numpy as np
 
 from evolution import fitness
-from evolution.experiment import RandomMazeWorld, course_step_limit, evaluate_course_set_outcome
+from evolution.experiment import (
+    DEFAULT_CURRICULUM,
+    RandomMazeWorld,
+    course_step_limit,
+    curriculum_maze_options,
+    evaluate_course_set_outcome,
+)
 from evolution.fitness import path_distances
 from sim.maze_generator import generate_perfect_maze
 from sim.robot import Vehicle
@@ -99,6 +105,34 @@ class RandomMazeWorldTests(unittest.TestCase):
         result = evaluate_course_set_outcome(first)
         self.assertEqual(len(result["courses"]), 3)
         self.assertTrue(np.isfinite(result["score"]))
+
+
+class CurriculumTests(unittest.TestCase):
+    def test_stages_grow_maze_size_over_the_run(self):
+        sizes = [curriculum_maze_options(g, 60)["size"] for g in range(60)]
+        self.assertEqual(sizes[:20], [12.0] * 20)
+        self.assertEqual(sizes[20:40], [16.0] * 20)
+        self.assertEqual(sizes[40:], [20.0] * 20)
+        self.assertEqual(curriculum_maze_options(5, 60, None), {})
+        with self.assertRaises(ValueError):
+            curriculum_maze_options(0, 10, ((0.5, {"size": 12.0}),))
+
+    def test_every_stage_generates_solvable_mazes(self):
+        rng = np.random.default_rng(3)
+        for _, options in DEFAULT_CURRICULUM:
+            for _ in range(10):
+                random_maze = generate_perfect_maze(rng, **options)
+                maze = random_maze.maze
+                self.assertEqual(maze.width, options["size"])
+                self.assertTrue(
+                    options["min_route_cells"] <= random_maze.route_cells <= options["max_route_cells"]
+                )
+                self.assertTrue(np.isfinite(path_distances(maze, [random_maze.start], 1.0)[0]))
+
+    def test_random_maze_world_uses_stage_options(self):
+        world = RandomMazeWorld(StandStill(), np.random.default_rng(0), mazes_per_evaluation=2,
+                                maze_options=curriculum_maze_options(0, 60))
+        self.assertEqual([m.maze.width for m in world.mazes], [12.0, 12.0])
 
 
 if __name__ == "__main__":

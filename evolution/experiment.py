@@ -38,6 +38,33 @@ DEFAULT_MIRROR_PROBABILITY = 0.0
 # Goal-light sensors for network-only evolution: "blocked" (walls block the
 # light), "through" (they do not), or None (3-input network, no light).
 DEFAULT_LIGHT_OCCLUSION = "blocked"
+# Random-maze curriculum: (fraction of the run at which the stage starts,
+# generate_perfect_maze options). Small mazes with short routes first so early
+# generations can reach the goal; the last stage matches the test mazes.
+DEFAULT_CURRICULUM = (
+    (0.0, {"size": 12.0, "min_route_cells": 2, "max_route_cells": 3}),
+    (1 / 3, {"size": 16.0, "min_route_cells": 2, "max_route_cells": 5}),
+    (2 / 3, {"size": 20.0, "min_route_cells": 3, "max_route_cells": 6}),
+)
+
+
+def curriculum_maze_options(generation, generations, curriculum=DEFAULT_CURRICULUM):
+    """Return the maze options of the curriculum stage active at ``generation``.
+
+    ``curriculum`` is a sequence of ``(start_fraction, options)`` sorted by
+    start fraction, the first starting at 0. ``None`` or empty means the
+    default full-size mazes for the whole run.
+    """
+    if not curriculum:
+        return {}
+    if curriculum[0][0] != 0:
+        raise ValueError("the first curriculum stage must start at 0")
+    progress = generation / max(generations, 1)
+    options = curriculum[0][1]
+    for start_fraction, stage_options in curriculum:
+        if progress >= start_fraction - 1e-12:
+            options = stage_options
+    return dict(options)
 HISTORY_FIELDS = (
     "training_seed",
     "generation",
@@ -401,6 +428,7 @@ def run_experiment(
     mazes_per_evaluation=DEFAULT_MAZES_PER_EVALUATION,
     mirror_probability=DEFAULT_MIRROR_PROBABILITY,
     light_occlusion=DEFAULT_LIGHT_OCCLUSION,
+    curriculum=DEFAULT_CURRICULUM,
 ):
     if training not in ("random_mazes", "courses"):
         raise ValueError("training must be 'random_mazes' or 'courses'")
@@ -474,6 +502,9 @@ def run_experiment(
                     noise_seed_base=noise_seed_base,
                     network_only=network_only,
                     robot_noise=robot_noise,
+                    maze_options=curriculum_maze_options(
+                        algorithm.generation, generations, curriculum
+                    ),
                     **world_options,
                 )
             return MultiCourseWorld(
@@ -548,6 +579,9 @@ def main():
     parser.add_argument("--mazes-per-evaluation", type=int,
                         default=DEFAULT_MAZES_PER_EVALUATION,
                         help="random mazes sampled for each training evaluation (default: 3)")
+    parser.add_argument("--no-curriculum", action="store_true",
+                        help="train on full-size random mazes from the first generation "
+                             "(default: grow maze size from 12 to 16 to 20 units)")
     parser.add_argument("--light-occlusion", choices=("blocked", "through", "none"),
                         default=DEFAULT_LIGHT_OCCLUSION,
                         help="goal-light sensors: walls block the light ('blocked', default), "
@@ -593,6 +627,7 @@ def main():
         mazes_per_evaluation=arguments.mazes_per_evaluation,
         mirror_probability=arguments.mirror_probability,
         light_occlusion=None if arguments.light_occlusion == "none" else arguments.light_occlusion,
+        curriculum=None if arguments.no_curriculum else DEFAULT_CURRICULUM,
     )
 
 

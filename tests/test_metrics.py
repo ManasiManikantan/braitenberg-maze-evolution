@@ -54,7 +54,8 @@ class TurningBiasTests(unittest.TestCase):
                                        **NO_NOISE))
             self.assertGreater(abs(a["turning_bias"]), 0.05)
             self.assertAlmostEqual(a["turning_bias"], -b["turning_bias"], places=6)
-            for name in ("speed", "wall_clearance", "exploration", "pct_steps_in_collision"):
+            for name in ("speed", "reverse_fraction", "wall_clearance", "exploration",
+                         "pct_steps_in_collision"):
                 self.assertAlmostEqual(a[name], b[name], places=6)
             if not np.isnan(a["wall_side"]):
                 self.assertAlmostEqual(a["wall_side"], 1.0 - b["wall_side"], places=6)
@@ -95,6 +96,24 @@ class MeasureTests(unittest.TestCase):
         self.assertEqual(result["pct_steps_in_collision"], 0.0)
         self.assertGreater(result["wall_clearance"], 0.0)
 
+    def test_reversing_counts_as_moving(self):
+        result = run_metrics(record_run(Fixed(-1.0, -1.0), open_arena(), max_steps=100,
+                                        light_occlusion=None, **NO_NOISE))
+        self.assertAlmostEqual(result["speed"], 1.0)
+        self.assertEqual(result["reverse_fraction"], 1.0)
+        forward = run_metrics(record_run(Fixed(1.0, 1.0), open_arena(), max_steps=100,
+                                         light_occlusion=None, **NO_NOISE))
+        self.assertEqual(forward["reverse_fraction"], 0.0)
+
+    def test_on_step_hook_and_world_are_kept(self):
+        seen = []
+        record = record_run(Fixed(0.5, 0.5), open_arena(), max_steps=20, light_occlusion="blocked",
+                            on_step=lambda vehicle: seen.append(vehicle.controller_inputs()),
+                            **NO_NOISE)
+        self.assertEqual(len(seen), 20)
+        self.assertEqual(len(seen[0]), 5)
+        self.assertEqual(record.world.steps, 20)
+
     def test_measures_are_in_range_and_summarized(self):
         episodes = random_maze_episodes(4, seed=1)
         summary = measure_controller(NeuralNetwork(seed=3, input_size=5), episodes)
@@ -104,6 +123,7 @@ class MeasureTests(unittest.TestCase):
             self.assertGreaterEqual(summary["std"][name], 0.0)
         for run in summary["runs"]:
             self.assertTrue(0.0 <= run["speed"] <= 1.0)
+            self.assertTrue(0.0 <= run["reverse_fraction"] <= 1.0)
             self.assertTrue(0.0 <= run["wall_clearance"] <= 1.0)
             self.assertTrue(-1.0 <= run["turning_bias"] <= 1.0)
             self.assertTrue(0.0 < run["exploration"] <= 1.0)

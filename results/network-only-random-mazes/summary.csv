@@ -1,0 +1,13 @@
+controller,test_set,runs,goal_success,mean_path_progress,pct_steps_in_collision,longest_pinned_mean,pct_moving_with_wall_beside,wall_on_left_share
+time_pressure,random test mazes (50),250,0.076,0.066,27.4,116.6,53.7,0.11
+time_pressure,course 1,25,0.8,0.851,24.6,94.6,14.7,0.08
+time_pressure,course 2,25,0.0,0.014,50.9,187.9,14.6,0.06
+time_pressure,course 3,25,0.0,0.161,30.7,182.8,55.4,0.47
+time_pressure,course 4,25,0.48,0.681,24.9,94.8,24.3,0.22
+time_pressure,courses 1-4,100,0.32,0.427,33.3,140.0,27.3,0.21
+random_mazes,random test mazes (50),250,0.164,0.134,60.2,259.9,47.4,0.47
+random_mazes,course 1,25,0.16,0.1,40.7,151.4,16.9,0.58
+random_mazes,course 2,25,0.0,-0.26,60.4,295.1,24.7,0.33
+random_mazes,course 3,25,0.0,0.061,20.6,136.1,15.6,0.24
+random_mazes,course 4,25,0.04,-0.033,47.5,160.3,20.8,0.68
+random_mazes,courses 1-4,100,0.05,-0.033,41.1,185.7,19.5,0.46
